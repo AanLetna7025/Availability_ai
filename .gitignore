@@ -1,0 +1,5 @@
+.env
+availability/
+project-management-db/
+__pycache__/
+current_implementation_and_goals.txt
