@@ -17,6 +17,7 @@ from .tools import (
     get_user_availability_tool,
     get_milestones_tool,
     get_team_members_tool,
+    get_project_status_tool,
 )
 
 # --- 1. Define the Agent State ---
@@ -35,7 +36,8 @@ def initialize_graph_agent(project_id: str):
     if not google_api_key:
         raise ValueError("GOOGLE_API_KEY not found in .env file")
     
-    llm = GoogleGenerativeAI(model="gemini-2.5-flash", temperature=0, google_api_key=google_api_key)
+    llm_model = os.getenv("LLM_MODEL", "gemini-1.5-flash")
+    llm = GoogleGenerativeAI(model=llm_model, temperature=0, google_api_key=google_api_key)
     
     # Create tools dictionary for easy lookup
     tools_dict = {
@@ -45,6 +47,7 @@ def initialize_graph_agent(project_id: str):
         "GetUserAvailability": partial(get_user_availability_tool, project_id=project_id),
         "GetMilestones": partial(get_milestones_tool, project_id=project_id),
         "GetTeamMembers": partial(get_team_members_tool, project_id=project_id),
+        "GetProjectStatus": partial(get_project_status_tool, project_id=project_id),
     }
     
     tools_description = """- GetProjectDetails: Use this tool to get all details for the current project.
@@ -52,7 +55,8 @@ def initialize_graph_agent(project_id: str):
 - GetUserDetails: Use this tool to get all details for a specific user. The input must be a single user ID string.
 - GetUserAvailability: Use this tool to get the availability of a user. The input must be a single user ID string.
 - GetMilestones: Use this tool to get all milestones for the current project.
-- GetTeamMembers: Use this tool to get all team members for the current project."""
+- GetTeamMembers: Use this tool to get all team members for the current project, including their IDs.
+- GetProjectStatus: Use this tool to get the status of the current project."""
     
     # --- 2. Create the Agent's Prompt ---
     prompt = PromptTemplate.from_template(
@@ -77,7 +81,7 @@ Action Input: for GetUserDetails and GetUserAvailability, the user ID. For other
 
 After receiving the Observation, then:
 Thought: analyze the observation
-Final Answer: provide the answer based on the observation
+Final Answer: provide the answer based on the observation, when returning team members, include their IDs.
 
 Current conversation:
 Question: {input}
