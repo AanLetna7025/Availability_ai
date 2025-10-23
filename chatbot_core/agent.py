@@ -1,13 +1,11 @@
 # chatbot_core/agent.py
 
 import os
-from typing import TypedDict, Annotated, Sequence
+from typing import TypedDict, Annotated
 import operator
 import re
 
 from langchain_core.prompts import PromptTemplate
-from langchain_core.tools import Tool
-from langchain_core.messages import BaseMessage, AIMessage, HumanMessage
 from langchain_google_genai import GoogleGenerativeAI
 from langgraph.graph import StateGraph, END
 
@@ -16,7 +14,7 @@ from .tools import get_project_details_tool
 # --- 1. Define the Agent State ---
 class AgentState(TypedDict):
     input: str
-    agent_outcome: str  # Changed from Sequence[BaseMessage]
+    agent_outcome: str
     intermediate_steps: Annotated[list[tuple], operator.add]
     final_answer: str
 
@@ -48,20 +46,29 @@ You must answer questions about the project with the ID: {project_id}
 You have access to the following tools:
 {tools}
 
-Use the following format for your thought process:
+CRITICAL RULES:
+1. You MUST use the correct tool based on the tool description FIRST before answering ANY question about the project
+2. Do NOT make up or assume ANY information
+3. Do NOT write "Observation:" yourself - the system will provide it after running the tool
+4. After writing "Action Input:", STOP immediately and wait for the Observation
+5. Only write "Final Answer:" after you have received an Observation with real data
+
+Use the following format EXACTLY:
 Question: the input question you must answer
-Thought: you should always think about what to do.
-Action: the action to take, should be one of [GetProjectDetails]
-Action Input: the input to the action
-Observation: the result of the action
-... (this Thought/Action/Action Input/Observation can repeat N times)
-Thought: I now know the final answer
-Final Answer: the final answer to the original input question
+Thought: think about what to do
+Action: call the tool you want to use
+Action Input: the project ID
+[STOP HERE - System will provide Observation]
 
-Begin!
+After receiving the Observation, then:
+Thought: analyze the observation
+Final Answer: provide the answer based on the observation
 
+Current conversation:
 Question: {input}
-{agent_scratchpad}"""
+{agent_scratchpad}
+
+Now begin! Remember: STOP after "Action Input:" and wait for the Observation."""
     )
 
     # --- 3. Helper Functions ---
@@ -81,30 +88,61 @@ Question: {input}
     
     def parse_agent_output(output: str):
         """Parse the LLM output to extract action or final answer"""
-        # Check for Final Answer
-        final_answer_match = re.search(r'Final Answer:\s*(.+?)(?:\n|$)', output, re.DOTALL)
+        print(f"\n=== RAW LLM OUTPUT ===\n{output}\n====================\n")
+        
+        # Split output by lines and stop at first "Observation:" to prevent hallucination
+        lines = output.split('\n')
+        cleaned_lines = []
+        for line in lines:
+            cleaned_lines.append(line)
+            # Stop if LLM tries to write Observation (it shouldn't!)
+            if line.strip().startswith('Observation:'):
+                print("⚠️ LLM tried to write Observation - stopping it")
+                break
+        
+        cleaned_output = '\n'.join(cleaned_lines)
+        
+        # Check for Final Answer FIRST (takes priority)
+        final_answer_match = re.search(r'Final Answer:\s*(.+?)$', cleaned_output, re.DOTALL | re.IGNORECASE)
         if final_answer_match:
-            return ("finish", final_answer_match.group(1).strip())
+            answer = final_answer_match.group(1).strip()
+            # Remove any trailing "Observation:" text if present
+            answer = re.split(r'\nObservation:', answer)[0].strip()
+            print(f"✅ Found Final Answer: {answer[:100]}...")
+            return ("finish", answer)
         
         # Extract Action and Action Input
-        action_match = re.search(r'Action:\s*(\w+)', output)
-        action_input_match = re.search(r'Action Input:\s*(.+?)(?:\n|$)', output, re.DOTALL)
+        action_match = re.search(r'Action:\s*(\w+)', cleaned_output)
+        action_input_match = re.search(r'Action Input:\s*(.+?)(?:\n|$)', cleaned_output, re.DOTALL)
         
         if action_match and action_input_match:
             action_name = action_match.group(1).strip()
             action_input = action_input_match.group(1).strip()
-            thought_match = re.search(r'Thought:\s*(.+?)(?:\n|$)', output)
-            thought = thought_match.group(1).strip() if thought_match else ""
+            
+            # Clean up action_input - remove any "Observation:" text
+            action_input = re.split(r'\nObservation:', action_input)[0].strip()
+            action_input = re.split(r'\nThought:', action_input)[0].strip()
+            action_input = re.split(r'\nFinal Answer:', action_input)[0].strip()
+            
+            # Get the thought (the last one before this action)
+            thought_matches = re.findall(r'Thought:\s*(.+?)(?:\n|$)', cleaned_output)
+            thought = thought_matches[-1].strip() if thought_matches else "Need to get project details"
+            
+            print(f"📋 Parsed Action: {action_name}")
+            print(f"📥 Action Input: {action_input}")
+            print(f"💭 Thought: {thought}")
             
             return ("continue", (thought, action_name, action_input))
         
-        # If parsing fails, return the raw output as final answer
-        return ("finish", output)
+        # If we can't parse anything useful, ask the agent to try again
+        print("⚠️ Could not parse valid action - forcing tool call")
+        return ("continue", ("I need to get project details", "GetProjectDetails", project_id))
 
     # --- 4. Define the Nodes for the Graph ---
 
     def run_agent(state):
         """The agent's brain - decides the next action"""
+        print(f"\n🤖 AGENT THINKING...")
         agent_scratchpad = format_agent_scratchpad(state.get('intermediate_steps', []))
         
         prompt_input = {
@@ -120,22 +158,29 @@ Question: {input}
         return {"agent_outcome": agent_outcome}
 
     def execute_tools(state):
-        """Executes the tools"""
+        """Executes the tools or processes final answer"""
         action_type, action_data = parse_agent_output(state['agent_outcome'])
         
         if action_type == "finish":
+            print(f"\n✅ PROCESSING FINAL ANSWER...")
+            print(f"📝 Answer: {action_data}")
             return {"final_answer": action_data}
         
+        print(f"\n🔧 EXECUTING TOOLS...")
         thought, action_name, action_input = action_data
         
         # Execute the tool
         if action_name in tools_dict:
             try:
+                print(f"🔍 Calling tool: {action_name} with input: {action_input}")
                 output = tools_dict[action_name](action_input)
+                print(f"\n📊 TOOL OUTPUT (first 500 chars):\n{str(output)[:500]}...\n")
             except Exception as e:
                 output = f"Error executing tool: {str(e)}"
+                print(f"❌ ERROR: {output}")
         else:
-            output = f"Unknown tool: {action_name}"
+            output = f"Unknown tool: {action_name}. Available tools: {list(tools_dict.keys())}"
+            print(f"❌ {output}")
         
         return {
             "intermediate_steps": [((thought, action_name, action_input), str(output))]
@@ -146,9 +191,17 @@ Question: {input}
         """Decides whether to continue the loop or finish"""
         action_type, _ = parse_agent_output(state['agent_outcome'])
         
-        if action_type == "finish" or len(state.get('intermediate_steps', [])) >= 5:
+        # Check if we've hit the iteration limit
+        if len(state.get('intermediate_steps', [])) >= 5:
+            print("⚠️ Maximum iterations reached - forcing finish")
+            # Extract whatever answer we have
+            return "end"
+        
+        if action_type == "finish":
+            print("🏁 Agent finished - has final answer")
             return "end"
         else:
+            print("🔄 Continuing to next iteration")
             return "continue"
 
     # --- 6. Assemble the Graph ---
@@ -159,16 +212,35 @@ Question: {input}
 
     workflow.set_entry_point("agent")
 
+    # Route to action node for both continue and end
+    # The action node will either execute tools or set final_answer
     workflow.add_conditional_edges(
         "agent",
         should_continue,
         {
             "continue": "action",
-            "end": "action",  # Still process final answer
+            "end": "action",  # Still go to action to process final answer
         },
     )
     
-    workflow.add_edge("action", END)
+    # After action, decide whether to loop back or end
+    def after_action(state):
+        """Check if we have a final answer"""
+        if state.get('final_answer'):
+            print("🎯 Final answer set - ending workflow")
+            return "end"
+        else:
+            print("🔄 No final answer yet - looping back to agent")
+            return "continue"
+    
+    workflow.add_conditional_edges(
+        "action",
+        after_action,
+        {
+            "continue": "agent",
+            "end": END
+        }
+    )
 
     app = workflow.compile()
     
