@@ -4,12 +4,20 @@ import os
 from typing import TypedDict, Annotated
 import operator
 import re
+from functools import partial
 
 from langchain_core.prompts import PromptTemplate
 from langchain_google_genai import GoogleGenerativeAI
 from langgraph.graph import StateGraph, END
 
-from .tools import get_project_details_tool
+from .tools import (
+    get_project_details_tool,
+    get_project_tasks_tool,
+    get_user_details_tool,
+    get_user_availability_tool,
+    get_milestones_tool,
+    get_team_members_tool,
+)
 
 # --- 1. Define the Agent State ---
 class AgentState(TypedDict):
@@ -31,17 +39,24 @@ def initialize_graph_agent(project_id: str):
     
     # Create tools dictionary for easy lookup
     tools_dict = {
-        "GetProjectDetails": get_project_details_tool,
+        "GetProjectDetails": partial(get_project_details_tool, project_id=project_id),
+        "GetProjectTasks": partial(get_project_tasks_tool, project_id=project_id),
+        "GetUserDetails": partial(get_user_details_tool, project_id=project_id),
+        "GetUserAvailability": partial(get_user_availability_tool, project_id=project_id),
+        "GetMilestones": partial(get_milestones_tool, project_id=project_id),
+        "GetTeamMembers": partial(get_team_members_tool, project_id=project_id),
     }
     
-    tools_description = "\n".join([
-        f"- GetProjectDetails: Use this tool to get all details for a specific project, including its tasks. The input must be a single project ID string."
-    ])
+    tools_description = """- GetProjectDetails: Use this tool to get all details for the current project.
+- GetProjectTasks: Use this tool to get all tasks for the current project.
+- GetUserDetails: Use this tool to get all details for a specific user. The input must be a single user ID string.
+- GetUserAvailability: Use this tool to get the availability of a user. The input must be a single user ID string.
+- GetMilestones: Use this tool to get all milestones for the current project.
+- GetTeamMembers: Use this tool to get all team members for the current project."""
     
     # --- 2. Create the Agent's Prompt ---
     prompt = PromptTemplate.from_template(
-        """You are an AI assistant helping with project management.
-You must answer questions about the project with the ID: {project_id}
+        """You are an AI assistant helping with project management for project {project_id}.
 
 You have access to the following tools:
 {tools}
@@ -49,15 +64,15 @@ You have access to the following tools:
 CRITICAL RULES:
 1. You MUST use the correct tool based on the tool description FIRST before answering ANY question about the project
 2. Do NOT make up or assume ANY information
-3. Do NOT write "Observation:" yourself - the system will provide it after running the tool
-4. After writing "Action Input:", STOP immediately and wait for the Observation
-5. Only write "Final Answer:" after you have received an Observation with real data
+3. Do NOT write \"Observation:\" yourself - the system will provide it after running the tool
+4. After writing \"Action Input:\", STOP immediately and wait for the Observation
+5. Only write \"Final Answer:\" after you have received an Observation with real data
 
 Use the following format EXACTLY:
 Question: the input question you must answer
 Thought: think about what to do
 Action: call the tool you want to use
-Action Input: the project ID
+Action Input: for GetUserDetails and GetUserAvailability, the user ID. For other tools, leave this empty.
 [STOP HERE - System will provide Observation]
 
 After receiving the Observation, then:
@@ -68,7 +83,7 @@ Current conversation:
 Question: {input}
 {agent_scratchpad}
 
-Now begin! Remember: STOP after "Action Input:" and wait for the Observation."""
+Now begin! Remember: STOP after \"Action Input:\" and wait for the Observation."""
     )
 
     # --- 3. Helper Functions ---
@@ -113,11 +128,11 @@ Now begin! Remember: STOP after "Action Input:" and wait for the Observation."""
         
         # Extract Action and Action Input
         action_match = re.search(r'Action:\s*(\w+)', cleaned_output)
-        action_input_match = re.search(r'Action Input:\s*(.+?)(?:\n|$)', cleaned_output, re.DOTALL)
+        action_input_match = re.search(r'Action Input:\s*(.*?)(?:\n|$)', cleaned_output, re.DOTALL)
         
-        if action_match and action_input_match:
+        if action_match:
             action_name = action_match.group(1).strip()
-            action_input = action_input_match.group(1).strip()
+            action_input = action_input_match.group(1).strip() if action_input_match else ""
             
             # Clean up action_input - remove any "Observation:" text
             action_input = re.split(r'\nObservation:', action_input)[0].strip()
@@ -136,7 +151,7 @@ Now begin! Remember: STOP after "Action Input:" and wait for the Observation."""
         
         # If we can't parse anything useful, ask the agent to try again
         print("⚠️ Could not parse valid action - forcing tool call")
-        return ("continue", ("I need to get project details", "GetProjectDetails", project_id))
+        return ("continue", ("I need to get project details", "GetProjectDetails", ""))
 
     # --- 4. Define the Nodes for the Graph ---
 
@@ -173,7 +188,10 @@ Now begin! Remember: STOP after "Action Input:" and wait for the Observation."""
         if action_name in tools_dict:
             try:
                 print(f"🔍 Calling tool: {action_name} with input: {action_input}")
-                output = tools_dict[action_name](action_input)
+                if action_name in ["GetUserDetails", "GetUserAvailability"]:
+                    output = tools_dict[action_name](user_id=action_input)
+                else:
+                    output = tools_dict[action_name]()
                 print(f"\n📊 TOOL OUTPUT (first 500 chars):\n{str(output)[:500]}...\n")
             except Exception as e:
                 output = f"Error executing tool: {str(e)}"
