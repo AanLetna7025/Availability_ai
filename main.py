@@ -12,7 +12,7 @@ app = FastAPI(title="Project Chatbot API")
 class ChatRequest(BaseModel):
     query: str
 
-@app.post("/chat/{project_id}")
+@app.get("/chat/{project_id}")
 async def chat_with_project(project_id: str, request: ChatRequest):
     """
     Chat endpoint for a specific project using a LangGraph agent.

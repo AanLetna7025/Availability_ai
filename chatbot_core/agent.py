@@ -12,13 +12,17 @@ from langgraph.graph import StateGraph, END
 
 from .tools import (
     get_project_details_tool,
-    get_project_tasks_tool,
+    #get_project_tasks_tool,
     get_user_details_tool,
     get_user_availability_tool,
     get_milestones_tool,
     get_team_members_tool,
     get_project_status_tool,
-)
+    get_project_technologies_tool,
+    get_overdue_tasks_by_user_tool,
+    get_user_workload_tool,
+    get_task_details_tool
+    )
 
 # --- 1. Define the Agent State ---
 class AgentState(TypedDict):
@@ -36,28 +40,36 @@ def initialize_graph_agent(project_id: str):
     if not google_api_key:
         raise ValueError("GOOGLE_API_KEY not found in .env file")
     
-    llm_model = os.getenv("LLM_MODEL", "gemini-1.5-flash")
+    llm_model = os.getenv("LLM_MODEL", "gemini-2.5-flash")
     llm = GoogleGenerativeAI(model=llm_model, temperature=0, google_api_key=google_api_key)
     
     # Create tools dictionary for easy lookup
     tools_dict = {
         "GetProjectDetails": partial(get_project_details_tool, project_id=project_id),
-        "GetProjectTasks": partial(get_project_tasks_tool, project_id=project_id),
         "GetUserDetails": partial(get_user_details_tool, project_id=project_id),
         "GetUserAvailability": partial(get_user_availability_tool, project_id=project_id),
         "GetMilestones": partial(get_milestones_tool, project_id=project_id),
         "GetTeamMembers": partial(get_team_members_tool, project_id=project_id),
         "GetProjectStatus": partial(get_project_status_tool, project_id=project_id),
+        "GetTechnologiesUsed":partial(get_project_technologies_tool,project_id=project_id),
+        "GetOverdueTasksByUser": partial(get_overdue_tasks_by_user_tool, project_id=project_id),
+        "GetUserWorkload": partial(get_user_workload_tool, project_id=project_id),
+        "GetTaskDetails": partial(get_task_details_tool, project_id=project_id),
     }
     
-    tools_description = """- GetProjectDetails: Use this tool to get all details for the current project.
-- GetProjectTasks: Use this tool to get all tasks for the current project.
-- GetUserDetails: Use this tool to get all details for a specific user. The input must be a single user ID string.
-- GetUserAvailability: Use this tool to get the availability of a user. The input must be a single user ID string.
-- GetMilestones: Use this tool to get all milestones for the current project.
-- GetTeamMembers: Use this tool to get all team members for the current project, including their IDs.
-- GetProjectStatus: Use this tool to get the status of the current project."""
-    
+    tools_description = """- GetProjectDetails: Use this tool to get all details for the current project. No input needed.
+- GetUserDetails: Use this tool to get all details for a specific user. The input can be either a user ID or the user's name (e.g., "Nikhil", "John Doe", or "62a1a72b6b80112de04d23e4").
+- GetUserAvailability: Use this tool to get the availability of a user. The input can be either a user ID or the user's name (e.g., "Nikhil", "Sarah Smith", or "62a1a72b6b80112de04d23e4").
+- GetMilestones: Use this tool to get all milestones for the current project. No input needed.
+- GetTeamMembers: Use this tool to get all team members for the current project, including their IDs and names. No input needed.
+- GetProjectStatus: Use this tool to get the status of the current project (total tasks, completed tasks, overdue tasks). No input needed.
+- GetTechnologiesUsed: Use this tool to get all technologies (with names, versions, and types) used in the current project. No input needed.
+- GetOverdueTasksByUser: Use this tool to get all overdue tasks grouped by assigned users. Shows days overdue and priority. No input needed.
+- GetUserWorkload: Use this tool to get workload summary for a specific user. The input can be either a user ID or the user's name (e.g., "Nikhil", "John Doe", or "62a1a72b6b80112de04d23e4").
+- GetTaskDetails: Use this tool to get ALL tasks for the project with full details (names, status, assignments, milestones, groups, overdue flags). Returns all tasks - you can filter by status (e.g., 'NEW', 'In Progress') in your answer to show pending, completed, or in-progress tasks. No input needed."""
+
+#REMOVED TOOL-#"GetProjectTasks": partial(get_project_tasks_tool, project_id=project_id),- GetProjectTasks: Use this tool to get all tasks for the current project.
+
     # --- 2. Create the Agent's Prompt ---
     prompt = PromptTemplate.from_template(
         """You are an AI assistant helping with project management for project {project_id}.
@@ -91,7 +103,7 @@ Now begin! Remember: STOP after \"Action Input:\" and wait for the Observation."
     )
 
     # --- 3. Helper Functions ---
-    
+
     def format_agent_scratchpad(intermediate_steps):
         """Format intermediate steps for the prompt"""
         if not intermediate_steps:
@@ -187,19 +199,30 @@ Now begin! Remember: STOP after \"Action Input:\" and wait for the Observation."
         
         print(f"\n🔧 EXECUTING TOOLS...")
         thought, action_name, action_input = action_data
+     
+        USER_ID_TOOLS = {"GetUserDetails", "GetUserAvailability", "GetUserWorkload"}
         
         # Execute the tool
         if action_name in tools_dict:
             try:
-                print(f"🔍 Calling tool: {action_name} with input: {action_input}")
-                if action_name in ["GetUserDetails", "GetUserAvailability"]:
-                    output = tools_dict[action_name](user_id=action_input)
+                print(f"🔍 Calling tool: {action_name} with input: '{action_input}'")
+                
+                if action_name in USER_ID_TOOLS:
+                    # Tools that need user_id parameter
+                    if not action_input or action_input.strip() == "":
+                        output = {"error": f"{action_name} requires a user_id or user name as input"}
+                    else:
+                        output = tools_dict[action_name](user_id=action_input.strip())
                 else:
+                    # Tools that don't need parameters (they already have project_id via partial)
                     output = tools_dict[action_name]()
+                    
                 print(f"\n📊 TOOL OUTPUT (first 500 chars):\n{str(output)[:500]}...\n")
             except Exception as e:
+                import traceback
                 output = f"Error executing tool: {str(e)}"
                 print(f"❌ ERROR: {output}")
+                traceback.print_exc()
         else:
             output = f"Unknown tool: {action_name}. Available tools: {list(tools_dict.keys())}"
             print(f"❌ {output}")
