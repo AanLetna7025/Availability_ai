@@ -1,3 +1,6 @@
+# This script launches two independent services (FastAPI and Streamlit)
+# and monitors them, ensuring a clean shutdown if either fails.
+
 import subprocess
 import time
 import sys
@@ -5,14 +8,13 @@ import requests
 import os
 import signal
 
-# --- Configuration ---
-# Detect environment
+# Check if the PORT env variable exists (standard for deployment platforms)
 IS_PRODUCTION = bool(os.environ.get('PORT'))
-# Streamlit must run on the public port
+# Streamlit MUST use the public PORT for the platform to detect the service
 STREAMLIT_PORT = os.environ.get('PORT', '8501')
-# FastAPI runs on a fixed internal port
+# FastAPI runs on a fixed internal port (private to the container)
 FASTAPI_PORT = '8000'
-# Use 0.0.0.0 in production, otherwise localhost for local testing
+# Listen on all interfaces (0.0.0.0) in production for external access
 HOST = '0.0.0.0' if IS_PRODUCTION else '127.0.0.1'
 
 # Global process references
@@ -20,31 +22,29 @@ fastapi_process = None
 streamlit_process = None
 
 def check_fastapi_ready(max_attempts=30):
-    """Wait for FastAPI to be ready using a health check."""
+    """Wait for FastAPI to be ready using an internal health check."""
     print("⏳ Waiting for FastAPI to start...", flush=True)
-    # Always check the internal endpoint on 127.0.0.1
     health_url = f"http://127.0.0.1:{FASTAPI_PORT}/health"
     
     for i in range(max_attempts):
+        # 1. Check if the process died before being ready
         if fastapi_process and fastapi_process.poll() is not None:
-            # Check if process died
             print(f"❌ FastAPI process died with exit code: {fastapi_process.poll()}", flush=True)
-            print("Please check logs above for FastAPI startup errors.", flush=True)
+            print("🛑 Check logs for ModuleNotFoundError or configuration errors.", flush=True)
             return False
             
+        # 2. Try to connect to the health endpoint
         try:
-            # Use a short timeout for the check
             response = requests.get(health_url, timeout=1)
             if response.status_code == 200:
                 print("✅ FastAPI is ready!", flush=True)
                 return True
         except requests.exceptions.RequestException:
-            # Ignore connection errors while waiting
-            pass
+            pass # Keep trying if connection fails
         
         time.sleep(1)
         if (i + 1) % 5 == 0:
-            print(f"   Still waiting... ({i+1}/{max_attempts})", flush=True)
+            print(f"   Still waiting... ({i+1}/{max_attempts})", flush=True)
             
     return False
 
@@ -54,7 +54,7 @@ def cleanup_processes(signum=None, frame=None):
     
     print("\n\n🛑 Shutting down services...", flush=True)
     
-    # Terminate Streamlit
+    # 1. Terminate Streamlit
     if streamlit_process:
         print("⏳ Stopping Streamlit...", flush=True)
         streamlit_process.terminate()
@@ -63,7 +63,7 @@ def cleanup_processes(signum=None, frame=None):
         except subprocess.TimeoutExpired:
             streamlit_process.kill()
     
-    # Terminate FastAPI
+    # 2. Terminate FastAPI
     if fastapi_process:
         print("⏳ Stopping FastAPI...", flush=True)
         fastapi_process.terminate()
@@ -73,7 +73,6 @@ def cleanup_processes(signum=None, frame=None):
             fastapi_process.kill()
     
     print("✅ All services stopped", flush=True)
-    # Only exit if called by signal handler
     if signum is not None:
         sys.exit(0)
 
@@ -83,11 +82,11 @@ def main():
     env_name = "PRODUCTION" if IS_PRODUCTION else "DEVELOPMENT"
     print(f"🚀 Starting Project Chatbot System ({env_name} mode)...\n", flush=True)
     
-    # Set up signal handling for graceful shutdown
+    # Set up signal handlers for graceful shutdown (e.g., when the platform kills the process)
     signal.signal(signal.SIGINT, cleanup_processes)
     signal.signal(signal.SIGTERM, cleanup_processes)
     
-    # --- 1. Start FastAPI ---
+    # --- 1. Start FastAPI (Backend) ---
     print(f"📡 Starting FastAPI backend on {HOST}:{FASTAPI_PORT}...", flush=True)
     
     fastapi_cmd = [
@@ -99,38 +98,32 @@ def main():
     if not IS_PRODUCTION:
         fastapi_cmd.append("--reload")
     
-    # By using stdout=None and stderr=None (default behavior), 
-    # the subprocess output goes directly to the main process's stdout/stderr, 
-    # which the deployment platform can reliably capture.
+    # Popen ensures the subprocess logs go directly to the main console
     fastapi_process = subprocess.Popen(fastapi_cmd)
     
-    # Give it a moment to initialize the command
-    time.sleep(1)
-    
-    # --- 2. Wait for FastAPI ---
+    # --- 2. Wait for FastAPI to be ready ---
     if not check_fastapi_ready():
-        print("\n❌ FastAPI failed to start. Shutting down.", flush=True)
+        print("\n❌ FastAPI failed to start. Exiting.", flush=True)
         cleanup_processes()
         return
     
-    # --- 3. Start Streamlit ---
+    # --- 3. Start Streamlit (Frontend) ---
     print(f"\n🎨 Starting Streamlit interface on port {STREAMLIT_PORT}...", flush=True)
     
     streamlit_cmd = [
         sys.executable, "-m", "streamlit", "run", "streamlit_app.py",
         "--server.port", STREAMLIT_PORT,
-        "--server.address", HOST
+        "--server.address", HOST,
     ]
     
     if IS_PRODUCTION:
-        # Essential flags for containerized Streamlit
+        # These flags are essential for cloud deployment
         streamlit_cmd.extend([
             "--server.headless", "true",
             "--server.enableCORS", "false",
             "--server.enableXsrfProtection", "false"
         ])
     
-    # Let Streamlit also inherit the parent's I/O streams
     streamlit_process = subprocess.Popen(streamlit_cmd)
     
     # --- 4. Monitor Processes ---
@@ -139,15 +132,9 @@ def main():
         while True:
             time.sleep(1)
             
-            # Check for FastAPI failure
-            if fastapi_process.poll() is not None:
-                print(f"\n❌ FastAPI has stopped! Exit Code: {fastapi_process.poll()}", flush=True)
-                cleanup_processes()
-                break
-            
-            # Check for Streamlit failure (which means the main web service failed)
-            if streamlit_process.poll() is not None:
-                print(f"\n❌ Streamlit has stopped! Exit Code: {streamlit_process.poll()}", flush=True)
+            # Check if either process has terminated unexpectedly
+            if fastapi_process.poll() is not None or streamlit_process.poll() is not None:
+                print("\n❌ One service failed. Initiating full shutdown.", flush=True)
                 cleanup_processes()
                 break
             
