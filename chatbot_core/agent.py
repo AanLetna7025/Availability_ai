@@ -5,14 +5,13 @@ from typing import TypedDict, Annotated
 import operator
 import re
 from functools import partial
-
 from langchain_core.prompts import PromptTemplate
 from langchain_google_genai import GoogleGenerativeAI
 from langgraph.graph import StateGraph, END
+from langgraph.checkpoint.memory import MemorySaver
 
 from .tools import (
     get_project_details_tool,
-    #get_project_tasks_tool,
     get_user_details_tool,
     get_user_availability_tool,
     get_milestones_tool,
@@ -116,17 +115,15 @@ Now begin! Remember: STOP after \"Action Input:\" and wait for the Observation."
             thoughts += f"Action Input: {action[2]}\n"
             thoughts += f"Observation: {observation}\n"
         return thoughts
-    
+
     def parse_agent_output(output: str):
         """Parse the LLM output to extract action or final answer"""
         print(f"\n=== RAW LLM OUTPUT ===\n{output}\n====================\n")
         
-        # Split output by lines and stop at first "Observation:" to prevent hallucination
         lines = output.split('\n')
         cleaned_lines = []
         for line in lines:
             cleaned_lines.append(line)
-            # Stop if LLM tries to write Observation (it shouldn't!)
             if line.strip().startswith('Observation:'):
                 print("⚠️ LLM tried to write Observation - stopping it")
                 break
@@ -134,26 +131,19 @@ Now begin! Remember: STOP after \"Action Input:\" and wait for the Observation."
         cleaned_output = '\n'.join(cleaned_lines)
         
         # Check for Final Answer FIRST (takes priority)
-        final_answer_match = re.search(r'Final Answer:\s*(.+?)$', cleaned_output, re.DOTALL | re.IGNORECASE)
+        final_answer_match = re.search(r'Final Answer:\s*(.+?)(?:\n(?:Thought|Action|Question|Observation):|$)', cleaned_output, re.DOTALL | re.IGNORECASE)
         if final_answer_match:
             answer = final_answer_match.group(1).strip()
-            # Remove any trailing "Observation:" text if present
-            answer = re.split(r'\nObservation:', answer)[0].strip()
             print(f"✅ Found Final Answer: {answer[:100]}...")
             return ("finish", answer)
         
         # Extract Action and Action Input
         action_match = re.search(r'Action:\s*(\w+)', cleaned_output)
-        action_input_match = re.search(r'Action Input:\s*(.*?)(?:\n|$)', cleaned_output, re.DOTALL)
+        action_input_match = re.search(r'Action Input:\s*(.*?)(?:\n(?:Thought|Action|Question|Observation|Final):|$)', cleaned_output, re.DOTALL)
         
         if action_match:
             action_name = action_match.group(1).strip()
             action_input = action_input_match.group(1).strip() if action_input_match else ""
-            
-            # Clean up action_input - remove any "Observation:" text
-            action_input = re.split(r'\nObservation:', action_input)[0].strip()
-            action_input = re.split(r'\nThought:', action_input)[0].strip()
-            action_input = re.split(r'\nFinal Answer:', action_input)[0].strip()
             
             # Get the thought (the last one before this action)
             thought_matches = re.findall(r'Thought:\s*(.+?)(?:\n|$)', cleaned_output)
@@ -165,10 +155,17 @@ Now begin! Remember: STOP after \"Action Input:\" and wait for the Observation."
             
             return ("continue", (thought, action_name, action_input))
         
-        # If we can't parse anything useful, ask the agent to try again
+        # If no clear action and we have observation data, force a final answer
+        if "Observation:" in cleaned_output or len(cleaned_output) > 200:
+            print("⚠️ Could not parse action but have data - forcing Final Answer")
+            # Extract any meaningful content as the answer
+            answer_content = cleaned_output.split("Thought:")[-1].strip()
+            if len(answer_content) > 50:
+                return ("finish", answer_content)
+        
         print("⚠️ Could not parse valid action - forcing tool call")
         return ("continue", ("I need to get project details", "GetProjectDetails", ""))
-
+    
     # --- 4. Define the Nodes for the Graph ---
 
     def run_agent(state):
@@ -231,24 +228,22 @@ Now begin! Remember: STOP after \"Action Input:\" and wait for the Observation."
             "intermediate_steps": [((thought, action_name, action_input), str(output))]
         }
 
-    # --- 5. Define the Conditional Edge ---
     def should_continue(state):
         """Decides whether to continue the loop or finish"""
         action_type, _ = parse_agent_output(state['agent_outcome'])
         
-        # Check if we've hit the iteration limit
-        if len(state.get('intermediate_steps', [])) >= 5:
-            print("⚠️ Maximum iterations reached - forcing finish")
-            # Extract whatever answer we have
+        # Check iteration limit - be more strict
+        num_iterations = len(state.get('intermediate_steps', []))
+        if num_iterations >= 10:
+            print(f"⚠️ Maximum iterations ({num_iterations}) reached - forcing finish")
             return "end"
         
         if action_type == "finish":
             print("🏁 Agent finished - has final answer")
             return "end"
         else:
-            print("🔄 Continuing to next iteration")
+            print(f"🔄 Continuing to next iteration (iteration {num_iterations + 1})")
             return "continue"
-
     # --- 6. Assemble the Graph ---
     workflow = StateGraph(AgentState)
 
@@ -286,7 +281,7 @@ Now begin! Remember: STOP after \"Action Input:\" and wait for the Observation."
             "end": END
         }
     )
-
-    app = workflow.compile()
+    memory=MemorySaver()
+    app = workflow.compile(checkpointer=memory)
     
     return app
