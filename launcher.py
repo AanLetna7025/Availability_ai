@@ -13,14 +13,14 @@ streamlit_process = None
 IS_PRODUCTION = os.environ.get('RENDER') or os.environ.get('PRODUCTION')
 STREAMLIT_PORT = os.environ.get('PORT', '8501')  # Render provides PORT
 FASTAPI_PORT = '8000'
-HOST = 'localhost' if IS_PRODUCTION else '127.0.0.1'
+HOST = '0.0.0.0' if IS_PRODUCTION else '127.0.0.1'
 
 def check_fastapi_ready(max_attempts=15):
     """Wait for FastAPI to be ready"""
     print("⏳ Waiting for FastAPI to start...")
     health_url = f"http://{HOST}:{FASTAPI_PORT}/health"
     
-    for i in range(max_attempts): 
+    for i in range(max_attempts):
         try:
             response = requests.get(health_url, timeout=2)
             if response.status_code == 200:
