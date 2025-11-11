@@ -4,21 +4,29 @@ import sys
 import requests
 import os
 import signal
+import threading
 
 # Global process references
 fastapi_process = None
 streamlit_process = None
 
 # Detect environment
-IS_PRODUCTION = os.environ.get('RENDER') or os.environ.get('PRODUCTION')
-STREAMLIT_PORT = os.environ.get('PORT', '8501')  # Render provides PORT
+IS_PRODUCTION = bool(os.environ.get('PORT'))
+STREAMLIT_PORT = os.environ.get('PORT', '8501')
 FASTAPI_PORT = '8000'
 HOST = '0.0.0.0' if IS_PRODUCTION else '127.0.0.1'
+
+def log_process_output(process, name):
+    """Log output from a process in real-time"""
+    if process.stdout:
+        for line in iter(process.stdout.readline, b''):
+            if line:
+                print(f"[{name}] {line.decode().strip()}")
 
 def check_fastapi_ready(max_attempts=15):
     """Wait for FastAPI to be ready"""
     print("⏳ Waiting for FastAPI to start...")
-    health_url = f"http://{HOST}:{FASTAPI_PORT}/health"
+    health_url = f"http://127.0.0.1:{FASTAPI_PORT}/health"
     
     for i in range(max_attempts):
         try:
@@ -64,29 +72,10 @@ def main():
     env_name = "PRODUCTION" if IS_PRODUCTION else "DEVELOPMENT"
     print(f"🚀 Starting Project Chatbot System ({env_name} mode)...\n")
     
-    # Set up signal handlers for clean shutdown
     signal.signal(signal.SIGINT, cleanup_processes)
     signal.signal(signal.SIGTERM, cleanup_processes)
     
-    # Check if FastAPI is already running (development mode)
-    if not IS_PRODUCTION:
-        try:
-            response = requests.get(f"http://{HOST}:{FASTAPI_PORT}/health", timeout=1)
-            if response.status_code == 200:
-                print("✅ FastAPI is already running!")
-                print("\n🎨 Starting Streamlit interface...")
-                streamlit_process = subprocess.Popen(
-                    [sys.executable, "-m", "streamlit", "run", "streamlit_app.py"]
-                )
-                try:
-                    streamlit_process.wait()
-                except KeyboardInterrupt:
-                    cleanup_processes()
-                return
-        except:
-            pass
-    
-    # Start FastAPI in background
+    # Start FastAPI
     print(f"📡 Starting FastAPI backend on {HOST}:{FASTAPI_PORT}...")
     
     fastapi_cmd = [
@@ -95,36 +84,42 @@ def main():
         "--port", FASTAPI_PORT
     ]
     
-    # Add --reload only in development
     if not IS_PRODUCTION:
         fastapi_cmd.append("--reload")
     
-    if os.name == 'nt' and not IS_PRODUCTION:  # Windows development
+    if os.name == 'nt' and not IS_PRODUCTION:
         fastapi_process = subprocess.Popen(
             fastapi_cmd,
             creationflags=subprocess.CREATE_NEW_CONSOLE
         )
-    else:  # Linux/Mac or Production
+    else:
         fastapi_process = subprocess.Popen(
             fastapi_cmd,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
+            stderr=subprocess.STDOUT,
+            bufsize=1
         )
+        
+        # Start logging thread for FastAPI output
+        log_thread = threading.Thread(
+            target=log_process_output, 
+            args=(fastapi_process, "FastAPI"),
+            daemon=True
+        )
+        log_thread.start()
     
-    # Wait for FastAPI to be ready
+    # Wait for FastAPI
     if not check_fastapi_ready():
         print("\n❌ FastAPI failed to start!")
-        if not IS_PRODUCTION:
-            print("\n🔍 Please check the FastAPI terminal window for errors")
-            print("💡 Try running manually in a separate terminal:")
-            print(f"   uvicorn main:app --reload --port {FASTAPI_PORT}")
-            input("\nPress Enter to exit...")
+        print("\n📋 Check the error messages above for details")
+        
+        # Wait a bit to see any error messages
+        time.sleep(2)
         cleanup_processes()
         return
     
     # Start Streamlit
     print(f"\n🎨 Starting Streamlit interface on port {STREAMLIT_PORT}...")
-    print("="*60)
     
     streamlit_cmd = [
         sys.executable, "-m", "streamlit", "run", "streamlit_app.py",
@@ -132,7 +127,6 @@ def main():
         "--server.address", HOST
     ]
     
-    # Add headless mode for production
     if IS_PRODUCTION:
         streamlit_cmd.extend([
             "--server.headless", "true",
@@ -140,24 +134,18 @@ def main():
             "--server.enableXsrfProtection", "false"
         ])
     
-    if not IS_PRODUCTION:
-        print("💡 Press Ctrl+C to stop both services")
-        print("="*60)
-    
     try:
         streamlit_process = subprocess.Popen(streamlit_cmd)
         
-        # Keep script running and monitor both processes
+        # Monitor processes
         while True:
             time.sleep(1)
             
-            # Check if FastAPI crashed
             if fastapi_process.poll() is not None:
                 print("\n❌ FastAPI has stopped!")
                 cleanup_processes()
                 break
             
-            # Check if Streamlit crashed
             if streamlit_process.poll() is not None:
                 print("\n❌ Streamlit has stopped!")
                 cleanup_processes()
