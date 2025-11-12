@@ -1,15 +1,14 @@
 fastapi==0.121.0
-google-ai-generativelanguage==0.4.0
-google-generativeai==0.3.2
-langchain==1.0.5
-langchain-community==0.4.1
-langchain-core==1.0.4
-langchain-google-genai==0.0.1
-langgraph==1.0.2
-langgraph-checkpoint==3.0.1
+uvicorn==0.38.0
+streamlit==1.51.0
 pymongo==4.15.3
 python-dotenv==1.2.1
 requests==2.32.5
-requests-toolbelt==1.0.0
-streamlit==1.51.0
-uvicorn==0.38.0
+
+# LangChain 0.2.x - All versions tested together
+langchain-core==0.2.38
+langchain==0.2.16
+langchain-community==0.2.16
+langchain-google-genai==1.0.8
+langgraph==0.1.19
+langsmith==0.1.129

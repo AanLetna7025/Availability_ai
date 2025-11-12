@@ -6,7 +6,7 @@ import operator
 import re
 from functools import partial
 from langchain_core.prompts import PromptTemplate
-from langchain_google_genai import GoogleGenerativeAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 
@@ -40,7 +40,7 @@ def initialize_graph_agent(project_id: str):
         raise ValueError("GOOGLE_API_KEY not found in .env file")
     
     llm_model = os.getenv("LLM_MODEL", "gemini-2.5-flash")
-    llm = GoogleGenerativeAI(model=llm_model, temperature=0, google_api_key=google_api_key)
+    llm = ChatGoogleGenerativeAI(model=llm_model, temperature=0, google_api_key=google_api_key)
     
     # Create tools dictionary for easy lookup
     tools_dict = {
@@ -116,11 +116,20 @@ Now begin! Remember: STOP after \"Action Input:\" and wait for the Observation."
             thoughts += f"Observation: {observation}\n"
         return thoughts
 
-    def parse_agent_output(output: str):
+    def parse_agent_output(output):
         """Parse the LLM output to extract action or final answer"""
-        print(f"\n=== RAW LLM OUTPUT ===\n{output}\n====================\n")
         
-        lines = output.split('\n')
+        # Extract text from AIMessage object
+        if hasattr(output, 'content'):
+            output_text = output.content
+        elif isinstance(output, str):
+            output_text = output
+        else:
+            output_text = str(output)
+        
+        print(f"\n=== RAW LLM OUTPUT ===\n{output_text}\n====================\n")
+        
+        lines = output_text.split('\n')
         cleaned_lines = []
         for line in lines:
             cleaned_lines.append(line)
@@ -165,7 +174,7 @@ Now begin! Remember: STOP after \"Action Input:\" and wait for the Observation."
         
         print("⚠️ Could not parse valid action - forcing tool call")
         return ("continue", ("I need to get project details", "GetProjectDetails", ""))
-    
+        
     # --- 4. Define the Nodes for the Graph ---
 
     def run_agent(state):
@@ -230,7 +239,18 @@ Now begin! Remember: STOP after \"Action Input:\" and wait for the Observation."
 
     def should_continue(state):
         """Decides whether to continue the loop or finish"""
-        action_type, _ = parse_agent_output(state['agent_outcome'])
+        
+        # Extract agent_outcome and handle AIMessage objects
+        agent_outcome = state.get('agent_outcome', '')
+        
+        # Handle AIMessage objects
+        if hasattr(agent_outcome, 'content'):
+            outcome_text = agent_outcome.content
+        else:
+            outcome_text = str(agent_outcome)
+        
+        # Parse the output
+        action_type, _ = parse_agent_output(agent_outcome)
         
         # Check iteration limit - be more strict
         num_iterations = len(state.get('intermediate_steps', []))
