@@ -3,6 +3,7 @@
 import streamlit as st
 import requests
 import uuid
+import os
 
 st.set_page_config(page_title="Project Chatbot", page_icon="💬", layout="wide")
 
@@ -15,7 +16,7 @@ if "current_project" not in st.session_state:
     st.session_state.current_project = ""
 
 # API endpoint - try both localhost and 127.0.0.1
-API_URL = "http://127.0.0.1:8000"
+API_URL = os.getenv("FASTAPI_URL", "http://127.0.0.1:8000")
 
 st.title("💬 Project Management Chatbot")
 

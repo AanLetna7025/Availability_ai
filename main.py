@@ -4,6 +4,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from contextlib import asynccontextmanager
+from fastapi.middleware.cors import CORSMiddleware
 
 from chatbot_core.agent import initialize_graph_agent
 
@@ -43,6 +44,15 @@ async def lifespan(app: FastAPI):
     print("\n🛑 FastAPI shutting down...")
 
 app = FastAPI(title="Project Chatbot API", lifespan=lifespan)
+
+# CORS CONFIGURATION
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Will restrict this later
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 class ChatRequest(BaseModel):
     query: str
