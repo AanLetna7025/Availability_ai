@@ -20,16 +20,20 @@ API_URL = os.getenv("FASTAPI_URL", "http://127.0.0.1:8000")
 
 st.title("💬 Project Management Chatbot")
 
-# Check API health
-try:
-    health_check = requests.get(f"{API_URL}/health", timeout=2)
-    if health_check.status_code == 200:
-        st.success("✅ Connected to API")
-    else:
-        st.error("⚠️ API is running but not responding correctly")
-except:
-    st.error(f"❌ Cannot connect to API at {API_URL}. Make sure FastAPI is running!")
-    st.info("Run in terminal: `uvicorn main:app --reload --port 8000`")
+# Automatically wake up backend with longer timeout
+with st.spinner(" Connecting to backend..."):
+    try:
+        health_check = requests.get(f"{API_URL}/health", timeout=90)  # Long timeout for cold start
+        if health_check.status_code == 200:
+            st.success("✅ Connected to API")
+        else:
+            st.error("⚠️ API responded but status is not healthy")
+    except requests.exceptions.Timeout:
+        st.error("❌ Backend took too long to respond. Please refresh the page.")
+    except requests.exceptions.ConnectionError:
+        st.error("❌ Cannot reach backend. Please check if it's deployed correctly.")
+    except Exception as e:
+        st.error(f"❌ Error connecting to backend: {str(e)}")
 
 # Sidebar
 with st.sidebar:
