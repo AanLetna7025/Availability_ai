@@ -20,37 +20,22 @@ API_URL = os.getenv("FASTAPI_URL", "http://127.0.0.1:8000")
 
 st.title("💬 Project Management Chatbot")
 
-# AUTO WAKE-UP BACKEND ON STARTUP
-@st.cache_resource(show_spinner=False)
-def wake_up_backend():
-    """
-    Wake up the backend service on first load.
-    Uses @st.cache_resource so it only runs once per session.
-    """
-    with st.spinner("🚀 Starting backend service... (first load takes ~60 seconds)"):
-        try:
-            # Long timeout to wait for backend to wake up
-            response = requests.get(f"{API_URL}/health", timeout=90)
-            if response.status_code == 200:
-                return True, "Backend is ready!"
-        except Exception as e:
-            return False, f"Backend startup failed: {str(e)}"
-    return False, "Backend timeout"
+# AUTO WAKE-UP BACKEND ON STARTUP (Simpler)
+@st.cache_resource(show_spinner="🚀 Connecting to backend... (first load takes ~60 seconds)")
+def check_backend_health():
+    """Wake up and check backend health"""
+    try:
+        response = requests.get(f"{API_URL}/health", timeout=90)
+        return response.status_code == 200
+    except:
+        return False
 
-# Execute auto wake-up
-success, message = wake_up_backend()
-
-# Show connection status
-if success:
+# Check backend
+if check_backend_health():
     st.success("✅ Connected to API")
 else:
-    st.error(f"❌ {message}")
-    st.info("💡 Tip: The backend might still be starting. Refresh the page in a moment.")
-    
-    # Manual retry button as fallback
-    if st.button("🔄 Retry Connection"):
-        st.cache_resource.clear()  # Clear cache to force retry
-        st.rerun()
+    st.error("❌ Could not connect to backend")
+    st.info("Please refresh the page in a moment. The backend might still be starting.")
 
 # Sidebar
 with st.sidebar:
