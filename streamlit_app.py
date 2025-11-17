@@ -4,6 +4,7 @@ import streamlit as st
 import requests
 import uuid
 import os
+import time
 
 st.set_page_config(page_title="Project Chatbot", page_icon="💬", layout="wide")
 
@@ -14,29 +15,51 @@ if "messages" not in st.session_state:
     st.session_state.messages = {}
 if "current_project" not in st.session_state:
     st.session_state.current_project = ""
+if "backend_wakeup_sent" not in st.session_state:
+    st.session_state.backend_wakeup_sent = False
 
 # API endpoint - try both localhost and 127.0.0.1
 API_URL = os.getenv("FASTAPI_URL", "http://127.0.0.1:8000")
 
 st.title("💬 Project Management Chatbot")
 
-# AUTO WAKE-UP BACKEND ON STARTUP (Simpler)
-@st.cache_resource(show_spinner="🚀 Connecting to backend... (first load takes ~60 seconds)")
-def check_backend_health():
-    """Wake up and check backend health"""
+# Fire wake-up request IMMEDIATELY (only once)
+if not st.session_state.backend_wakeup_sent:
     try:
-        response = requests.get(f"{API_URL}/health", timeout=90)
-        return response.status_code == 200
+        # Non-blocking request to trigger backend wake-up
+        requests.get(f"{API_URL}/health", timeout=0.5)
     except:
-        return False
+        pass  # Ignore errors, we just want to trigger the wake-up
+    st.session_state.backend_wakeup_sent = True
 
-# Check backend
-if check_backend_health():
-    st.success("✅ Connected to API")
+# Now check backend with retries
+def check_backend_with_retries():
+    """Check backend health with multiple attempts"""
+    max_attempts = 20
+    
+    for attempt in range(max_attempts):
+        try:
+            response = requests.get(f"{API_URL}/health", timeout=5)
+            if response.status_code == 200:
+                return True, attempt + 1
+        except:
+            pass
+        
+        if attempt < max_attempts - 1:
+            time.sleep(3)  # Wait 3 seconds between attempts
+    
+    return False, max_attempts
+
+# Check backend with progress
+with st.spinner("🚀 Connecting to backend... (first load takes ~60 seconds)"):
+    connected, attempts = check_backend_with_retries()
+
+if connected:
+    st.success(f"✅ Connected to API (connected after {attempts * 3} seconds)")
 else:
-    st.error("❌ Could not connect to backend")
+    st.error("❌ Could not connect to backend after 60 seconds")
     st.info("Please refresh the page in a moment. The backend might still be starting.")
-
+    st.stop()
 # Sidebar
 with st.sidebar:
     st.header("⚙️ Configuration")
