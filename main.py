@@ -48,8 +48,8 @@ app = FastAPI(title="Project Chatbot API", lifespan=lifespan)
 # CORS CONFIGURATION
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://availability-ai-frontend.onrender.com",
-        "http://localhost:8501"],  # restricted
+    allow_origins=["http://127.0.0.1:8501",
+        "http://localhost:8501"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

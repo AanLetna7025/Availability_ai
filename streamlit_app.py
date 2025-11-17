@@ -15,51 +15,22 @@ if "messages" not in st.session_state:
     st.session_state.messages = {}
 if "current_project" not in st.session_state:
     st.session_state.current_project = ""
-if "backend_wakeup_sent" not in st.session_state:
-    st.session_state.backend_wakeup_sent = False
 
 # API endpoint - try both localhost and 127.0.0.1
 API_URL = os.getenv("FASTAPI_URL", "http://127.0.0.1:8000")
 
 st.title("💬 Project Management Chatbot")
 
-# Fire wake-up request IMMEDIATELY (only once)
-if not st.session_state.backend_wakeup_sent:
-    try:
-        # Non-blocking request to trigger backend wake-up
-        requests.get(f"{API_URL}/health", timeout=0.5)
-    except:
-        pass  # Ignore errors, we just want to trigger the wake-up
-    st.session_state.backend_wakeup_sent = True
-
-# Now check backend with retries
-def check_backend_with_retries():
-    """Check backend health with multiple attempts"""
-    max_attempts = 20
-    
-    for attempt in range(max_attempts):
-        try:
-            response = requests.get(f"{API_URL}/health", timeout=5)
-            if response.status_code == 200:
-                return True, attempt + 1
-        except:
-            pass
-        
-        if attempt < max_attempts - 1:
-            time.sleep(3)  # Wait 3 seconds between attempts
-    
-    return False, max_attempts
-
-# Check backend with progress
-with st.spinner("🚀 Connecting to backend... (first load takes ~60 seconds)"):
-    connected, attempts = check_backend_with_retries()
-
-if connected:
-    st.success(f"✅ Connected to API (connected after {attempts * 3} seconds)")
-else:
-    st.error("❌ Could not connect to backend after 60 seconds")
-    st.info("Please refresh the page in a moment. The backend might still be starting.")
+try:
+    response = requests.get(f"{API_URL}/health", timeout=2)
+    if response.status_code != 200:
+        st.error("❌ Backend is not responding correctly")
+        st.stop()
+except Exception as e:
+    st.error(f"❌ Cannot connect to backend: {str(e)}")
+    st.info("If you just deployed, please wait a moment and refresh.")
     st.stop()
+
 # Sidebar
 with st.sidebar:
     st.header("⚙️ Configuration")
