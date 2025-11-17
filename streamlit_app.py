@@ -16,24 +16,41 @@ if "current_project" not in st.session_state:
     st.session_state.current_project = ""
 
 # API endpoint - try both localhost and 127.0.0.1
-API_URL = os.getenv("https://availability-ai.onrender.com", "http://127.0.0.1:8000")
+API_URL = os.getenv("FASTAPI_URL", "http://127.0.0.1:8000")
 
 st.title("💬 Project Management Chatbot")
 
-# Automatically wake up backend with longer timeout
-with st.spinner(" Connecting to backend..."):
-    try:
-        health_check = requests.get(f"{API_URL}/health", timeout=90)  # Long timeout for cold start
-        if health_check.status_code == 200:
-            st.success("✅ Connected to API")
-        else:
-            st.error("⚠️ API responded but status is not healthy")
-    except requests.exceptions.Timeout:
-        st.error("❌ Backend took too long to respond. Please refresh the page.")
-    except requests.exceptions.ConnectionError:
-        st.error("❌ Cannot reach backend. Please check if it's deployed correctly.")
-    except Exception as e:
-        st.error(f"❌ Error connecting to backend: {str(e)}")
+# AUTO WAKE-UP BACKEND ON STARTUP
+@st.cache_resource(show_spinner=False)
+def wake_up_backend():
+    """
+    Wake up the backend service on first load.
+    Uses @st.cache_resource so it only runs once per session.
+    """
+    with st.spinner("🚀 Starting backend service... (first load takes ~60 seconds)"):
+        try:
+            # Long timeout to wait for backend to wake up
+            response = requests.get(f"{API_URL}/health", timeout=90)
+            if response.status_code == 200:
+                return True, "Backend is ready!"
+        except Exception as e:
+            return False, f"Backend startup failed: {str(e)}"
+    return False, "Backend timeout"
+
+# Execute auto wake-up
+success, message = wake_up_backend()
+
+# Show connection status
+if success:
+    st.success("✅ Connected to API")
+else:
+    st.error(f"❌ {message}")
+    st.info("💡 Tip: The backend might still be starting. Refresh the page in a moment.")
+    
+    # Manual retry button as fallback
+    if st.button("🔄 Retry Connection"):
+        st.cache_resource.clear()  # Clear cache to force retry
+        st.rerun()
 
 # Sidebar
 with st.sidebar:
