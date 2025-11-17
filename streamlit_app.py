@@ -4,7 +4,6 @@ import streamlit as st
 import requests
 import uuid
 import os
-import time
 
 st.set_page_config(page_title="Project Chatbot", page_icon="💬", layout="wide")
 
@@ -17,34 +16,24 @@ if "current_project" not in st.session_state:
     st.session_state.current_project = ""
 
 # API endpoint - try both localhost and 127.0.0.1
-API_URL = os.getenv("FASTAPI_URL", "http://127.0.0.1:8000")
+API_URL = os.getenv("https://availability-ai.onrender.com", "http://127.0.0.1:8000")
 
 st.title("💬 Project Management Chatbot")
 
 # Automatically wake up backend with longer timeout
-MAX_RETRIES = 3
-RETRY_DELAY = 10  # seconds between retries
-
-with st.spinner("🔄 Waking up backend... please wait"):
-    backend_ready = False
-
-    for attempt in range(1, MAX_RETRIES + 1):
-        try:
-            health_check = requests.get(f"{API_URL}/health", timeout=90)  # Long timeout for cold start
-            if health_check.status_code == 200:
-                st.success("✅ Backend is awake and healthy!")
-                backend_ready = True
-                break
-            else:
-                st.warning(f"⚠️ Attempt {attempt}: Backend responded with status {health_check.status_code}")
-        except requests.exceptions.Timeout:
-            st.warning(f"⏳ Attempt {attempt}: Backend took too long to respond. Retrying...")
-        except requests.exceptions.ConnectionError:
-            st.warning(f"🌐 Attempt {attempt}: Cannot reach backend. Retrying...")
-        except Exception as e:
-            st.warning(f"⚠️ Attempt {attempt}: Error connecting to backend: {str(e)}")
-
-        time.sleep(RETRY_DELAY)
+with st.spinner(" Connecting to backend..."):
+    try:
+        health_check = requests.get(f"{API_URL}/health", timeout=90)  # Long timeout for cold start
+        if health_check.status_code == 200:
+            st.success("✅ Connected to API")
+        else:
+            st.error("⚠️ API responded but status is not healthy")
+    except requests.exceptions.Timeout:
+        st.error("❌ Backend took too long to respond. Please refresh the page.")
+    except requests.exceptions.ConnectionError:
+        st.error("❌ Cannot reach backend. Please check if it's deployed correctly.")
+    except Exception as e:
+        st.error(f"❌ Error connecting to backend: {str(e)}")
 
 # Sidebar
 with st.sidebar:
