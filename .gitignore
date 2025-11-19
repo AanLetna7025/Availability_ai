@@ -3,3 +3,5 @@ availability/
 project-management-db/
 __pycache__/
 current_implementation_and_goals.txt
+node_modules/
+availability_ai\creating_demo db\node_modules
