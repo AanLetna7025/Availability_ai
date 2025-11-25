@@ -12,3 +12,6 @@ langchain-community==0.2.16
 langchain-google-genai==1.0.8
 langgraph==0.1.19
 langsmith==0.1.129
+
+plotly
+pandas
