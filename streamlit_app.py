@@ -491,57 +491,144 @@ if not project_id or page == " Portfolio Overview":
     # SECTION 5: Charts
     # =========================
     st.subheader("📈 Analytics")
-    
+
     col1, col2 = st.columns(2)
-    
+
     with col1:
         st.markdown("**Health Score Distribution**")
         
-        # Bar chart of health scores
-        df_health = pd.DataFrame([
-            {
-                'Project': p.get('project_name', 'Unnamed')[:20],
-                'Health Score': p.get('health_score', 0)
+        if projects:
+            # Prepare data
+            df_health = pd.DataFrame([
+                {
+                    'Project': p.get('project_name', 'Unnamed')[:15],
+                    'Health Score': p.get('health_score', 0),
+                    'Status': p.get('health_status', 'UNKNOWN')
+                }
+                for p in projects[:10]
+            ])
+            
+            # Color mapping
+            color_map = {
+                'CRITICAL': '#ef4444',
+                'AT_RISK': '#f59e0b', 
+                'GOOD': '#84cc16',
+                'EXCELLENT': '#22c55e',
+                'UNKNOWN': '#6b7280'
             }
-            for p in projects[:10]  # Top 10
-        ])
-        
-        fig = px.bar(
-            df_health,
-            x='Project',
-            y='Health Score',
-            color='Health Score',
-            color_continuous_scale=['#ef4444', '#f59e0b', '#84cc16', '#22c55e']
-        )
-        fig.update_layout(height=300, showlegend=False)
-        st.plotly_chart(fig, use_container_width=True)
-    
+            
+            # Create figure with explicit colors
+            fig = go.Figure()
+            
+            for _, row in df_health.iterrows():
+                color = color_map.get(row['Status'], '#6b7280')
+                fig.add_trace(go.Bar(
+                    x=[row['Project']],
+                    y=[row['Health Score']],
+                    marker=dict(
+                        color=color,
+                        line=dict(color='rgba(255,255,255,0.3)', width=2),
+                        opacity=1.0
+                    ),
+                    text=[row['Health Score']],
+                    textposition='outside',
+                    textfont=dict(color='white', size=12, family='Arial Black'),
+                    name=row['Status'],
+                    showlegend=False,
+                    hovertemplate=f"<b>{row['Project']}</b><br>Health: {row['Health Score']}/100<extra></extra>"
+                ))
+            
+            # Dark theme layout
+            fig.update_layout(
+                height=350,
+                plot_bgcolor='rgba(31, 41, 55, 0.4)',
+                paper_bgcolor='rgba(0,0,0,0)',
+                font=dict(color='white', size=11),
+                xaxis=dict(
+                    title="",
+                    tickangle=-45,
+                    tickfont=dict(color='white', size=10),
+                    showgrid=False,
+                    showline=True,
+                    linecolor='rgba(255,255,255,0.2)'
+                ),
+                yaxis=dict(
+                    title="Health Score",
+                    range=[0, 110],
+                    tickfont=dict(color='white', size=10),
+                    showgrid=True,
+                    gridcolor='rgba(255,255,255,0.1)',
+                    showline=False,
+                    zeroline=True,
+                    zerolinecolor='rgba(255,255,255,0.2)'
+                ),
+                margin=dict(l=50, r=20, t=20, b=100),
+                bargap=0.3
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No project data available")
+
     with col2:
         st.markdown("**Project Status Breakdown**")
         
-        # Pie chart of status distribution
-        status_counts = {
-            'Critical': agg.get('critical_projects', 0),
-            'At Risk': agg.get('at_risk_projects', 0),
-            'Healthy': agg.get('healthy_projects', 0)
-        }
-        
-        fig = px.pie(
-            values=list(status_counts.values()),
-            names=list(status_counts.keys()),
-            color=list(status_counts.keys()),
-            color_discrete_map={
-                'Critical': '#ef4444',
-                'At Risk': '#f59e0b',
-                'Healthy': '#22c55e'
+        if projects:
+            # Pie chart of status distribution
+            status_counts = {
+                'Healthy': agg.get('healthy_projects', 0),
+                'At Risk': agg.get('at_risk_projects', 0),
+                'Critical': agg.get('critical_projects', 0)
             }
-        )
-        fig.update_layout(height=300)
-        st.plotly_chart(fig, use_container_width=True)
-    
-    # Resource heatmap
+            
+            # Only show if there's data
+            if sum(status_counts.values()) > 0:
+                fig = px.pie(
+                    values=list(status_counts.values()),
+                    names=list(status_counts.keys()),
+                    color=list(status_counts.keys()),
+                    color_discrete_map={
+                        'Healthy': '#22c55e',
+                        'At Risk': '#f59e0b',
+                        'Critical': '#ef4444'
+                    },
+                    hole=0.4  # Donut chart
+                )
+                
+                # Dark theme styling
+                fig.update_layout(
+                    height=350,
+                    showlegend=True,
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    font=dict(color='white', size=11),
+                    legend=dict(
+                        orientation="v",
+                        yanchor="middle",
+                        y=0.5,
+                        xanchor="left",
+                        x=1,
+                        font=dict(color='white')
+                    )
+                )
+                
+                fig.update_traces(
+                    textposition='inside',
+                    textinfo='percent+label',
+                    textfont=dict(color='white', size=12, family='Arial Black'),
+                    marker=dict(line=dict(color='rgba(255,255,255,0.3)', width=2))
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No status data available")
+        else:
+            st.info("No project data")
+
+    st.divider()
+
+    # Resource heatmap (KEEPING THIS PART - just reformatted)
     overloaded_members = portfolio_data.get('resource_insights', {}).get('overloaded_members', [])
-    
+
     if overloaded_members:
         st.markdown("**🔥 Resource Bottlenecks**")
         st.warning(f"**{len(overloaded_members)} team member(s) working across multiple projects:**")

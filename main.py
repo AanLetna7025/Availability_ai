@@ -1,11 +1,13 @@
 # main.py
 
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException, Query
+from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional
+import asyncio
+from datetime import datetime
 
 from chatbot_core.agent import initialize_graph_agent
 
@@ -38,49 +40,68 @@ from chatbot_core.portfolio_analyzer import (
 
 load_dotenv()
 
+# ============================================================================
+# GLOBAL STATE
+# ============================================================================
+
 # Cache for graph instances (one per project)
 graph_cache = {}
 
+# ============================================================================
+# LIFESPAN MANAGEMENT
+# ============================================================================
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """
+    Handles startup and shutdown events for the FastAPI application.
+    """
     # Startup
     print("\n" + "="*60)
-    print("🚀 FastAPI Starting Up...")
+    print(">> FastAPI Starting Up...")
     print("="*60)
     try:
         # Test MongoDB connection
         from chatbot_core.tools import db
         db.command('ping')
-        print("✅ MongoDB connected")
+        print("[OK] MongoDB connected")
         
         # Test Google API Key
         import os
         google_key = os.getenv("GOOGLE_API_KEY")
         if google_key:
-            print("✅ Google API Key found")
+            print("[OK] Google API Key found")
         else:
-            print("⚠️  Google API Key not found!")
+            print("[WARNING] Google API Key not found - AI features may be limited!")
             
         print("="*60 + "\n")
     except Exception as e:
-        print(f"❌ Startup Error: {e}")
+        print(f"[ERROR] Startup Error: {e}")
         print("="*60 + "\n")
+        # Don't fail startup, but warn
     
     yield
     
     # Shutdown
-    print("\n🛑 FastAPI shutting down...")
+    print("\n" + "="*60)
+    print(">> FastAPI shutting down...")
+    print("="*60)
+
+# ============================================================================
+# FASTAPI APP INITIALIZATION
+# ============================================================================
 
 app = FastAPI(
     title="Project Management Intelligence API",
     description="AI-powered project management with chat, analytics, and recommendations",
-    version="2.0.0"
+    version="2.0.0",
+    lifespan=lifespan  # ✅ FIXED: Added lifespan
 )
 
 # CORS CONFIGURATION
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # In production, specify actual domains
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -91,8 +112,96 @@ app.add_middleware(
 # ============================================================================
 
 class ChatRequest(BaseModel):
-    query: str
-    user_id: str
+    query: str = Field(..., min_length=1, max_length=2000, description="User query")
+    user_id: str = Field(..., min_length=1, max_length=100, description="User identifier")
+
+# ============================================================================
+# UTILITY FUNCTIONS
+# ============================================================================
+
+async def run_blocking_io(func, *args, timeout=30):
+    """
+    Run blocking I/O operations in thread pool with timeout.
+    Prevents blocking the event loop.
+    """
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(func, *args),
+            timeout=timeout
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="Request timeout")
+
+def validate_result(result):
+    """Check if result contains error and raise HTTPException if so."""
+    if isinstance(result, dict) and "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
+
+# ============================================================================
+# HEALTH CHECK ENDPOINTS
+# ============================================================================
+
+@app.get("/health")
+async def health_check():
+    """
+    Simple health check for deployment platforms and monitoring.
+    Returns immediately without database checks.
+    
+    Used by:
+    - Render/Railway/deployment platforms
+    - Load balancers
+    - Monitoring tools
+    - launcher.py script
+    """
+    return {"status": "ok"}
+
+
+@app.get("/health/full")
+async def health_check_full():
+    """
+    Complete health check including database connectivity.
+    
+    Returns:
+    - Service status
+    - Database connection status
+    - Available features
+    - Version info
+    
+    Example:
+    GET /health/full
+    """
+    from chatbot_core.tools import db
+    import os
+    
+    health_data = {
+        "status": "healthy",
+        "service": "Project Management Intelligence API",
+        "version": "2.0.0",
+        "database": "unknown",
+        "ai_enabled": bool(os.getenv("GOOGLE_API_KEY")),
+        "timestamp": datetime.utcnow().isoformat(),
+        "features": [
+            "ai_chatbot",
+            "project_health_analysis",
+            "workload_analysis",
+            "bottleneck_detection",
+            "milestone_risk_analysis",
+            "velocity_tracking",
+            "report_generation",
+            "ai_recommendations"
+        ]
+    }
+    
+    try:
+        db.command('ping')
+        health_data["database"] = "connected"
+    except Exception as e:
+        health_data["database"] = f"error: {str(e)}"
+        health_data["status"] = "degraded"
+    
+    return health_data
+
 
 # ============================================================================
 # PORTFOLIO OVERVIEW ENDPOINTS
@@ -116,10 +225,10 @@ async def get_portfolio_overview():
     GET /api/portfolio/overview
     """
     try:
-        portfolio_data = analyze_portfolio()
-        if "error" in portfolio_data:
-            return portfolio_data
-        return portfolio_data
+        portfolio_data = await run_blocking_io(analyze_portfolio, timeout=60)
+        return validate_result(portfolio_data)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -139,12 +248,13 @@ async def get_portfolio_insights():
     GET /api/portfolio/insights
     """
     try:
-        portfolio_data = analyze_portfolio()
-        if "error" in portfolio_data:
-            raise HTTPException(status_code=404, detail=portfolio_data["error"])
+        portfolio_data = await run_blocking_io(analyze_portfolio, timeout=60)
+        validate_result(portfolio_data)
         
-        insights = generate_portfolio_insights(portfolio_data)
+        insights = await run_blocking_io(generate_portfolio_insights, portfolio_data, timeout=60)
         return insights
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -164,7 +274,7 @@ async def list_all_projects():
     GET /api/portfolio/projects
     """
     try:
-        projects = get_all_projects()
+        projects = await run_blocking_io(get_all_projects)
         return {
             "total": len(projects),
             "projects": projects
@@ -186,10 +296,19 @@ async def chat_with_project(project_id: str, request: ChatRequest):
     - "What tasks are overdue?"
     - "Show me team workload"
     - "What's the project status?"
+    
+    Request body:
+    {
+        "query": "What tasks are overdue?",
+        "user_id": "user123"
+    }
+    
+    Response:
+    {
+        "response": "Here are the overdue tasks...",
+        "thread_id": "user123_project456"
+    }
     """
-    if not request.query:
-        raise HTTPException(status_code=400, detail="Query cannot be empty")
-        
     try:
         print(f"\n{'='*60}")
         print(f"📨 QUERY: {request.query}")
@@ -201,7 +320,11 @@ async def chat_with_project(project_id: str, request: ChatRequest):
         if project_id not in graph_cache:
             print(f"🔧 Initializing new graph for project: {project_id}")
             try:
-                graph_cache[project_id] = initialize_graph_agent(project_id)
+                # Run initialization in thread pool to avoid blocking
+                graph_cache[project_id] = await asyncio.to_thread(
+                    initialize_graph_agent, 
+                    project_id
+                )
                 print(f"✅ Graph initialized successfully")
             except Exception as e:
                 print(f"❌ Failed to initialize graph: {str(e)}")
@@ -221,12 +344,18 @@ async def chat_with_project(project_id: str, request: ChatRequest):
         }
         
         print(f"🚀 Invoking agent with thread_id: {thread_id}")
-        response = graph.invoke(
-            inputs,
-            config={
-                "configurable": {"thread_id": thread_id},
-                "recursion_limit": 50
-            }
+        
+        # Run agent with timeout
+        response = await asyncio.wait_for(
+            asyncio.to_thread(
+                graph.invoke,
+                inputs,
+                {
+                    "configurable": {"thread_id": thread_id},
+                    "recursion_limit": 50
+                }
+            ),
+            timeout=60.0  # 60 second timeout for chat
         )
         
         final_answer = response.get('final_answer', 'No answer generated')
@@ -238,6 +367,8 @@ async def chat_with_project(project_id: str, request: ChatRequest):
             "thread_id": thread_id
         }
         
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="Chat request timeout - please try again")
     except HTTPException:
         raise
     except Exception as e:
@@ -267,10 +398,10 @@ async def get_project_health(project_id: str):
     GET /api/projects/507f1f77bcf86cd799439011/health
     """
     try:
-        result = calculate_project_health(project_id)
-        if "error" in result:
-            raise HTTPException(status_code=404, detail=result["error"])
-        return result
+        result = await run_blocking_io(calculate_project_health, project_id)
+        return validate_result(result)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -293,17 +424,32 @@ async def get_project_dashboard(project_id: str):
     GET /api/projects/507f1f77bcf86cd799439011/dashboard
     """
     try:
-        dashboard = {
-            "health": calculate_project_health(project_id),
-            "workload": analyze_team_workload_balance(project_id),
-            "velocity": calculate_team_velocity(project_id, days=7),
-            "bottlenecks": detect_bottlenecks(project_id),
-            "milestone_risks": analyze_milestone_risks(project_id),
-        }
+        # Run all analyses in parallel for better performance
+        health_task = run_blocking_io(calculate_project_health, project_id)
+        workload_task = run_blocking_io(analyze_team_workload_balance, project_id)
+        velocity_task = run_blocking_io(calculate_team_velocity, project_id, 7)
+        bottlenecks_task = run_blocking_io(detect_bottlenecks, project_id)
+        milestones_task = run_blocking_io(analyze_milestone_risks, project_id)
+        recs_task = run_blocking_io(generate_rule_based_recommendations, project_id)
         
-        # Get top 3 quick recommendations
-        recs = generate_rule_based_recommendations(project_id)
-        dashboard["top_recommendations"] = recs.get("recommendations", [])[:3]
+        # Wait for all to complete
+        health, workload, velocity, bottlenecks, milestones, recs = await asyncio.gather(
+            health_task,
+            workload_task,
+            velocity_task,
+            bottlenecks_task,
+            milestones_task,
+            recs_task
+        )
+        
+        dashboard = {
+            "health": health,
+            "workload": workload,
+            "velocity": velocity,
+            "bottlenecks": bottlenecks,
+            "milestone_risks": milestones,
+            "top_recommendations": recs.get("recommendations", [])[:3]
+        }
         
         return dashboard
     except Exception as e:
@@ -329,10 +475,10 @@ async def analyze_workload(project_id: str):
     GET /api/projects/507f1f77bcf86cd799439011/analysis/workload
     """
     try:
-        result = analyze_team_workload_balance(project_id)
-        if "error" in result:
-            raise HTTPException(status_code=404, detail=result["error"])
-        return result
+        result = await run_blocking_io(analyze_team_workload_balance, project_id)
+        return validate_result(result)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -352,10 +498,10 @@ async def analyze_bottlenecks(project_id: str):
     GET /api/projects/507f1f77bcf86cd799439011/analysis/bottlenecks
     """
     try:
-        result = detect_bottlenecks(project_id)
-        if "error" in result:
-            raise HTTPException(status_code=404, detail=result["error"])
-        return result
+        result = await run_blocking_io(detect_bottlenecks, project_id)
+        return validate_result(result)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -376,21 +522,24 @@ async def analyze_milestones(project_id: str):
     GET /api/projects/507f1f77bcf86cd799439011/analysis/milestones
     """
     try:
-        result = analyze_milestone_risks(project_id)
-        if "error" in result:
-            raise HTTPException(status_code=404, detail=result["error"])
-        return result
+        result = await run_blocking_io(analyze_milestone_risks, project_id)
+        return validate_result(result)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/projects/{project_id}/analysis/velocity")
-async def get_team_velocity(project_id: str, days: Optional[int] = 7):
+async def get_team_velocity(
+    project_id: str, 
+    days: int = Query(default=7, ge=1, le=90, description="Number of days to analyze")
+):
     """
     Calculate team velocity and trends.
     
     Query Parameters:
-    - days: Number of days to analyze (default: 7)
+    - days: Number of days to analyze (1-90, default: 7)
     
     Returns:
     - Tasks completed in period
@@ -403,10 +552,10 @@ async def get_team_velocity(project_id: str, days: Optional[int] = 7):
     GET /api/projects/507f1f77bcf86cd799439011/analysis/velocity?days=14
     """
     try:
-        result = calculate_team_velocity(project_id, days)
-        if "error" in result:
-            raise HTTPException(status_code=404, detail=result["error"])
-        return result
+        result = await run_blocking_io(calculate_team_velocity, project_id, days)
+        return validate_result(result)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -436,12 +585,14 @@ async def get_daily_report(project_id: str):
     GET /api/projects/507f1f77bcf86cd799439011/reports/daily
     """
     try:
-        report = generate_daily_report(project_id)
+        report = await run_blocking_io(generate_daily_report, project_id, timeout=45)
         return {
             "report": report,
             "format": "text",
-            "generated_at": __import__('datetime').datetime.now().isoformat()
+            "generated_at": datetime.utcnow().isoformat()
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -467,12 +618,14 @@ async def get_weekly_report(project_id: str):
     GET /api/projects/507f1f77bcf86cd799439011/reports/weekly
     """
     try:
-        report = generate_weekly_summary(project_id)
+        report = await run_blocking_io(generate_weekly_summary, project_id, timeout=45)
         return {
             "report": report,
             "format": "text",
-            "generated_at": __import__('datetime').datetime.now().isoformat()
+            "generated_at": datetime.utcnow().isoformat()
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -497,12 +650,14 @@ async def get_executive_summary(project_id: str):
     GET /api/projects/507f1f77bcf86cd799439011/reports/executive
     """
     try:
-        report = generate_executive_summary(project_id)
+        report = await run_blocking_io(generate_executive_summary, project_id, timeout=45)
         return {
             "report": report,
             "format": "text",
-            "generated_at": __import__('datetime').datetime.now().isoformat()
+            "generated_at": datetime.utcnow().isoformat()
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -528,12 +683,14 @@ async def get_team_report(project_id: str):
     GET /api/projects/507f1f77bcf86cd799439011/reports/team
     """
     try:
-        report = generate_team_performance_report(project_id)
+        report = await run_blocking_io(generate_team_performance_report, project_id, timeout=45)
         return {
             "report": report,
             "format": "text",
-            "generated_at": __import__('datetime').datetime.now().isoformat()
+            "generated_at": datetime.utcnow().isoformat()
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -558,12 +715,14 @@ async def get_risk_report(project_id: str):
     GET /api/projects/507f1f77bcf86cd799439011/reports/risks
     """
     try:
-        report = generate_risk_report(project_id)
+        report = await run_blocking_io(generate_risk_report, project_id, timeout=45)
         return {
             "report": report,
             "format": "text",
-            "generated_at": __import__('datetime').datetime.now().isoformat()
+            "generated_at": datetime.utcnow().isoformat()
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -575,15 +734,15 @@ async def get_risk_report(project_id: str):
 @app.get("/api/projects/{project_id}/recommendations")
 async def get_recommendations(
     project_id: str, 
-    method: Optional[str] = "ai",
-    max_recommendations: Optional[int] = 5
+    method: str = Query(default="ai", regex="^(ai|rules)$"),
+    max_recommendations: int = Query(default=5, ge=1, le=20)
 ):
     """
     Generate AI-powered recommendations to improve project health.
     
     Query Parameters:
     - method: "ai" (uses Gemini LLM) or "rules" (rule-based, faster)
-    - max_recommendations: Maximum number to return (default: 5)
+    - max_recommendations: Maximum number to return (1-20, default: 5)
     
     Returns:
     - List of actionable recommendations
@@ -597,14 +756,21 @@ async def get_recommendations(
     """
     try:
         if method.lower() == "ai":
-            result = generate_ai_recommendations(project_id, max_recommendations)
+            result = await run_blocking_io(
+                generate_ai_recommendations, 
+                project_id, 
+                max_recommendations,
+                timeout=60
+            )
         else:
-            result = generate_rule_based_recommendations(project_id)
+            result = await run_blocking_io(
+                generate_rule_based_recommendations, 
+                project_id
+            )
         
-        if "error" in result:
-            raise HTTPException(status_code=404, detail=result["error"])
-        
-        return result
+        return validate_result(result)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -627,41 +793,17 @@ async def get_rule_based_recommendations(project_id: str):
     GET /api/projects/507f1f77bcf86cd799439011/recommendations/rules
     """
     try:
-        result = generate_rule_based_recommendations(project_id)
-        if "error" in result:
-            raise HTTPException(status_code=404, detail=result["error"])
-        return result
+        result = await run_blocking_io(generate_rule_based_recommendations, project_id)
+        return validate_result(result)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 # ============================================================================
-# UTILITY ENDPOINTS
+# ROOT ENDPOINT
 # ============================================================================
-
-@app.get("/health")
-async def health_check():
-    """
-    API health check endpoint.
-    
-    Returns service status and available features.
-    """
-    return {
-        "status": "healthy",
-        "service": "Project Management Intelligence API",
-        "version": "2.0.0",
-        "features": [
-            "ai_chatbot",
-            "project_health_analysis",
-            "workload_analysis",
-            "bottleneck_detection",
-            "milestone_risk_analysis",
-            "velocity_tracking",
-            "report_generation",
-            "ai_recommendations"
-        ]
-    }
-
 
 @app.get("/")
 async def root():
@@ -671,9 +813,15 @@ async def root():
     return {
         "message": "Project Management Intelligence API",
         "version": "2.0.0",
+        "status": "operational",
         "documentation": "/docs",
         "health_check": "/health",
         "endpoints": {
+            "portfolio": {
+                "overview": "/api/portfolio/overview",
+                "insights": "/api/portfolio/insights",
+                "projects": "/api/portfolio/projects"
+            },
             "chat": {
                 "path": "/chat/{project_id}",
                 "method": "POST",
@@ -711,7 +859,7 @@ async def root():
 
 
 # ============================================================================
-# RUN SERVER
+# RUN SERVER (for local development)
 # ============================================================================
 
 if __name__ == "__main__":
