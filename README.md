@@ -1,9 +1,17 @@
 # availability_ai
 
-AI-powered chatbot for the project management tool **Availability**. Get intelligent insights about projects, teams, tasks, and workloads using conversational AI.
+AI-powered project management intelligence system for **Availability**. Get instant insights across your entire project portfolio plus deep-dive analytics for individual projects using conversational AI.
 
-## ✨ Features (all works only within particular project_id)
+## ✨ Features
 
+### 🏠 Portfolio Overview (New!)
+- **No Project ID Required** - Instant portfolio-wide insights on homepage
+- **AI-Powered Analysis** - Gemini analyzes all projects simultaneously
+- **Visual Dashboard** - Health scores, alerts, and trends across projects
+- **Resource Intelligence** - Detect overloaded team members across projects
+- **Quick Navigation** - Click any project to drill down into details
+
+### 📊 Per-Project Features
 - 💬 **AI Chatbot** - Ask questions about your project in natural language
 - 📊 **Smart Dashboard** - Real-time health scores and project metrics
 - 🔍 **Deep Analytics** - Workload analysis, bottleneck detection, milestone risks
@@ -57,20 +65,31 @@ uvicorn main:app --reload --port 8000
 streamlit run streamlit_app.py
 ```
 
+## User Flow
+```
+1. Open App → Portfolio Overview (ALL projects)
+   ↓
+2. See health scores, alerts, AI insights
+   ↓
+3. Click "View Details" on any project
+   ↓
+4. Navigate to Dashboard/Analytics/Reports/Chatbot for deep dive
+```
+
 ## Example Questions
 
-**Chatbot queries:**
+**Portfolio-level (Homepage):**
+- View all projects at once
+- See which projects need attention
+- Identify overloaded team members across projects
+- Get AI-generated executive insights
+
+**Project-level (Chatbot):**
 - Who are the team members?
 - What is the project status?
 - Show me overdue tasks
 - What technologies are being used?
 - What is John's workload?
-
-**API endpoints:**
-- `GET /api/projects/{id}/health` - Get health score (0-100)
-- `GET /api/projects/{id}/dashboard` - Complete metrics
-- `GET /api/projects/{id}/recommendations` - AI suggestions
-- `GET /api/projects/{id}/reports/daily` - Generate reports
 
 ## Project Structure
 ```
@@ -78,7 +97,8 @@ availability_ai/
 ├── chatbot_core/
 │   ├── agent.py                 # LangGraph agent
 │   ├── tools.py                 # MongoDB queries
-│   ├── analysis_tools.py        # Health & analytics
+│   ├── analysis_tools.py        # Health & analytics (per-project)
+│   ├── portfolio_analyzer.py    # Portfolio-wide analysis (NEW)
 │   ├── report_generator.py      # Report generation
 │   └── recommendation_engine.py # AI recommendations
 ├── main.py                      # FastAPI backend (API + Analytics)
@@ -90,11 +110,25 @@ availability_ai/
 
 ## Features Overview
 
+### 🏠 Portfolio Overview Page (New Homepage)
+**No Project ID required** - Loads immediately with:
+- **Portfolio Metrics**: Total projects, average health, overdue tasks, team size
+- **Critical Alerts**: Projects and issues needing immediate attention
+- **AI Insights**: Executive summary, key insights, recommended actions
+- **Project Cards**: Visual grid showing all projects with health scores
+- **Charts**: Health distribution, status breakdown, resource heatmaps
+- **Resource Analysis**: Team members working across multiple projects
+
 ### 📊 Dashboard Page
 - Project health score (0-100) with breakdown
 - Task completion rates and velocity trends
 - Team size and workload distribution
 - Visual charts (pie, gauge, bar graphs)
+
+### 💬 Chatbot Page
+- Natural language queries about specific projects
+- Conversation memory per user-project
+- Access to 10+ project data tools
 
 ### 🔍 Analytics Page
 - **Workload Analysis** - Identify overloaded/underutilized team members
@@ -118,6 +152,11 @@ Generate professional reports:
 
 ## API Endpoints
 
+### Portfolio (New!)
+- `GET /api/portfolio/overview` - All projects analysis
+- `GET /api/portfolio/insights` - AI-generated portfolio insights
+- `GET /api/portfolio/projects` - Simple project list
+
 ### Chatbot
 **POST** `/chat/{project_id}`
 ```json
@@ -127,8 +166,9 @@ Generate professional reports:
 }
 ```
 
-### Analytics
+### Analytics (Per-Project)
 - `GET /api/projects/{id}/health` - Health score
+- `GET /api/projects/{id}/dashboard` - Complete metrics
 - `GET /api/projects/{id}/analysis/workload` - Team workload
 - `GET /api/projects/{id}/analysis/bottlenecks` - Blockers
 - `GET /api/projects/{id}/analysis/milestones` - Milestone risks
@@ -148,6 +188,20 @@ Generate professional reports:
 ### Utility
 - `GET /health` - Health check
 - `GET /` - API documentation
+
+## What Makes This Different?
+
+**Before:** 
+- One project at a time
+- Need Project ID to start
+- No cross-project insights
+
+**After:**
+- Portfolio-wide overview on homepage
+- AI analyzes ALL projects simultaneously
+- Identify patterns across projects
+- Resource allocation insights
+- Executive-ready dashboard
 
 ## Troubleshooting
 
@@ -178,6 +232,9 @@ python -c "from chatbot_core.tools import db; print(db.command('ping'))"
 
 # Imports
 python -c "from chatbot_core.agent import initialize_graph_agent; print('OK')"
+
+# Portfolio Analysis
+python -c "from chatbot_core.portfolio_analyzer import get_all_projects; print(f'Found {len(get_all_projects())} projects')"
 ```
 
 ## Tech Stack
@@ -185,11 +242,33 @@ python -c "from chatbot_core.agent import initialize_graph_agent; print('OK')"
 - **FastAPI** - REST API backend
 - **Streamlit** - Interactive web interface
 - **LangGraph** - Agentic workflow framework
-- **Google Gemini** - AI language model
+- **Google Gemini** - AI language model (Gemini 2.0 Flash)
 - **MongoDB** - Database
 - **Plotly** - Data visualizations
 - **Python 3.11+** - Core language
 
+## Use Cases
+
+### For Team Leads
+- Monitor all projects from one dashboard
+- Identify struggling projects early
+- Balance workload across teams
+- Get AI-powered recommendations
+
+### For Project Managers
+- Deep-dive analytics per project
+- Generate reports for stakeholders
+- Track milestones and risks
+- Chat with AI about project details
+
+### For Executives
+- Portfolio health at a glance
+- Executive summaries
+- Resource utilization insights
+- Strategic recommendations
+
 ---
 
 **Get Google API Key:** [Google AI Studio](https://makersuite.google.com/app/apikey)
+
+**Demo:** Run `python launcher.py` and open `http://localhost:8501` to see the portfolio overview!

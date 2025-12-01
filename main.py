@@ -30,6 +30,12 @@ from chatbot_core.recommendation_engine import (
     generate_rule_based_recommendations
 )
 
+from chatbot_core.portfolio_analyzer import (
+    analyze_portfolio,
+    generate_portfolio_insights,
+    get_all_projects
+)
+
 load_dotenv()
 
 # Cache for graph instances (one per project)
@@ -87,6 +93,84 @@ app.add_middleware(
 class ChatRequest(BaseModel):
     query: str
     user_id: str
+
+# ============================================================================
+# PORTFOLIO OVERVIEW ENDPOINTS
+# ============================================================================
+
+@app.get("/api/portfolio/overview")
+async def get_portfolio_overview():
+    """
+    Get portfolio-wide analysis of all projects.
+    Perfect for the homepage dashboard - no project ID needed!
+    
+    Returns:
+    - Total projects count
+    - Portfolio health score
+    - Aggregated metrics
+    - Project summaries
+    - Critical alerts
+    - Resource insights
+    
+    Example:
+    GET /api/portfolio/overview
+    """
+    try:
+        portfolio_data = analyze_portfolio()
+        if "error" in portfolio_data:
+            return portfolio_data
+        return portfolio_data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/portfolio/insights")
+async def get_portfolio_insights():
+    """
+    Get AI-generated insights about the entire portfolio.
+    
+    Returns:
+    - Executive summary
+    - Key insights
+    - Immediate actions needed
+    - Positive trends
+    
+    Example:
+    GET /api/portfolio/insights
+    """
+    try:
+        portfolio_data = analyze_portfolio()
+        if "error" in portfolio_data:
+            raise HTTPException(status_code=404, detail=portfolio_data["error"])
+        
+        insights = generate_portfolio_insights(portfolio_data)
+        return insights
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/portfolio/projects")
+async def list_all_projects():
+    """
+    Get a simple list of all active projects.
+    
+    Returns:
+    - Project IDs
+    - Project names
+    - Client names
+    - Basic info
+    
+    Example:
+    GET /api/portfolio/projects
+    """
+    try:
+        projects = get_all_projects()
+        return {
+            "total": len(projects),
+            "projects": projects
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ============================================================================

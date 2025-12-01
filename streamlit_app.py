@@ -113,13 +113,13 @@ if not check_api_health():
 # ============================================================================
 with st.sidebar:
     st.image("https://cdn3d.iconscout.com/3d/premium/thumb/ai-robot-character-standing-at-attention-with-smiling-face-3d-icon-png-download-11431326.png", width=80)
-    st.title(" Navigation")
+    st.title("Navigation")
     
     # Project ID input
     project_id = st.text_input(
         "Project ID",
         value=st.session_state.current_project,
-        placeholder="Enter project ID...",
+        placeholder="Enter project ID here...",
         help="Enter your MongoDB project ObjectId"
     )
     
@@ -129,38 +129,80 @@ with st.sidebar:
             st.session_state.messages[project_id] = []
     
     st.divider()
-    
+
     # Page navigation
-    page = st.radio(
-        "Select Page",
-        [
-            "💬 AI Chatbot",
-            "📊 Dashboard",
-            "🔍 Analytics",
-            "📄 Reports",
-            "💡 Recommendations"
-        ],
-        label_visibility="collapsed"
-    )
+    if project_id:
+        st.markdown("### 📂 Project Menu")
+        page = st.radio(
+            "Select View",
+            [
+                "💬 AI Chatbot",
+                "📊 Dashboard",
+                "🔍 Analytics",
+                "📄 Reports",
+                "💡 Recommendations"
+            ],
+            label_visibility="collapsed"
+        )
+        
+        # Clear project button
+        if st.button("← Back to Portfolio", use_container_width=True):
+            st.session_state.current_project = ""
+            st.rerun()
+        
+        # Clear chat button (only on chatbot page)
+        if page == "💬 AI Chatbot":
+            if st.button("🗑️ Clear Chat", use_container_width=True):
+                if project_id in st.session_state.messages:
+                    st.session_state.messages[project_id] = []
+                    st.rerun()
+    else:
+        # No project ID - show portfolio overview info
+        st.info(" **Portfolio Overview Mode**\n\nEnter a Project ID above to view project details.")
+        page = " Portfolio Overview"  # Default to homepage
     
     st.divider()
     
     # User info
     st.caption(f"👤 User: `{st.session_state.user_id[:8]}...`")
     st.caption(f"🔗 API: `{API_URL}`")
+
+
     
-    # Clear chat button (only show on chatbot page)
-    if page == "💬 AI Chatbot":
-        if st.button("🗑️ Clear Chat", use_container_width=True):
-            if project_id in st.session_state.messages:
-                st.session_state.messages[project_id] = []
-                st.rerun()
+# ============================================================================
+# HELPER FUNCTION FOR ALL PROJECTS
+# ============================================================================
 
-# Require project ID for all pages
-if not project_id:
-    st.info("👈 Please enter a Project ID in the sidebar to continue")
-    st.stop()
+@st.cache_data(ttl=300)  # Cache for 5 minutes
+def get_portfolio_overview():
+    try:
+        response = requests.get(f"{API_URL}/api/portfolio/overview", timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        return {"error": response.json().get("detail", "Unknown error")}
+    except Exception as e:
+        return {"error": str(e)}
 
+@st.cache_data(ttl=300)
+def get_portfolio_insights():
+    try:
+        response = requests.get(f"{API_URL}/api/portfolio/insights", timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        return {"error": response.json().get("detail", "Unknown error")}
+    except Exception as e:
+        return {"error": str(e)}
+
+@st.cache_data(ttl=300)
+def list_all_projects():
+    try:
+        response = requests.get(f"{API_URL}/api/portfolio/projects", timeout=10)
+        if response.status_code == 200:
+            return response.json()
+        return {"error": response.json().get("detail", "Unknown error")}
+    except Exception as e:
+        return {"error": str(e)}
+    
 # ============================================================================
 # HELPER FUNCTIONS FOR API CALLS
 # ============================================================================
@@ -235,10 +277,286 @@ def get_report(proj_id, report_type):
         return {"error": str(e)}
 
 # ============================================================================
-# PAGE 1: AI CHATBOT (Your existing chatbot)
+# PAGE 0 : ALL PROJECTS HOMEPAGE
 # ============================================================================
 
-if page == "💬 AI Chatbot":
+if not project_id or page == " Portfolio Overview":
+    st.title("ALL PROJECTS OVERVIEW")
+    st.markdown("**Welcome!** Get instant insights across all your projects.")
+    
+    # Refresh button
+    col1, col2, col3 = st.columns([6, 1, 1])
+    with col3:
+        if st.button("🔄 Refresh", use_container_width=True):
+            st.cache_data.clear()
+            st.rerun()
+    
+    # Load portfolio data
+    with st.spinner("🔍 Analyzing ..."):
+        portfolio_data = get_portfolio_overview()
+        insights_data = get_portfolio_insights()
+    
+    if "error" in portfolio_data:
+        st.error(f"❌ Error loading portfolio: {portfolio_data['error']}")
+        st.info("Make sure you have active projects in your database.")
+        st.stop()
+    
+    # =========================
+    # SECTION 1: Key Metrics
+    # =========================
+    st.subheader("📊 Portfolio at a Glance")
+    
+    col1, col2, col3, col4, col5 = st.columns(5)
+    
+    with col1:
+        st.metric(
+            "Total Projects",
+            portfolio_data.get('total_projects', 0),
+            help="Active projects in portfolio"
+        )
+    
+    with col2:
+        portfolio_health = portfolio_data.get('portfolio_health', 0)
+        if portfolio_health >= 70:
+            emoji = "🟢"
+        elif portfolio_health >= 50:
+            emoji = "🟡"
+        else:
+            emoji = "🔴"
+        
+        st.metric(
+            "Portfolio Health",
+            f"{portfolio_health}/100 {emoji}",
+            help="Average health across all projects"
+        )
+    
+    with col3:
+        agg = portfolio_data.get('aggregated_metrics', {})
+        completion = agg.get('avg_completion_rate', 0)
+        st.metric(
+            "Avg Completion",
+            f"{completion}%",
+            help="Average task completion rate"
+        )
+    
+    with col4:
+        overdue = agg.get('total_overdue', 0)
+        st.metric(
+            "Overdue Tasks",
+            overdue,
+            delta=f"-{overdue}" if overdue > 0 else "0",
+            delta_color="inverse",
+            help="Total overdue tasks across portfolio"
+        )
+    
+    with col5:
+        st.metric(
+            "Team Members",
+            agg.get('total_team_members', 0),
+            help="Total team members across all projects"
+        )
+    
+    st.divider()
+    
+    # =========================
+    # SECTION 2: Critical Alerts
+    # =========================
+    critical_alerts = portfolio_data.get('critical_alerts', [])
+    
+    if critical_alerts:
+        st.subheader("🚨 Needs Immediate Attention")
+        
+        for alert in critical_alerts:
+            severity = alert.get('severity', 'INFO')
+            message = alert.get('message', '')
+            category = alert.get('category', 'GENERAL')
+            
+            if severity == 'HIGH':
+                st.error(f"**{category}**: {message}")
+            elif severity == 'MEDIUM':
+                st.warning(f"**{category}**: {message}")
+            else:
+                st.info(f"**{category}**: {message}")
+        
+        st.divider()
+    
+    # =========================
+    # SECTION 3: AI Insights
+    # =========================
+    st.subheader("💡 AI-Generated Insights")
+    
+    if "error" not in insights_data and insights_data.get('success'):
+        insights = insights_data.get('insights', {})
+        
+        # Executive Summary
+        st.markdown(f"**Executive Summary:**")
+        st.info(insights.get('executive_summary', 'No summary available'))
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("**🔍 Key Insights:**")
+            for insight in insights.get('key_insights', []):
+                st.markdown(f"- {insight}")
+        
+        with col2:
+            st.markdown("**✅ Immediate Actions:**")
+            for action in insights.get('immediate_actions', []):
+                st.markdown(f"- {action}")
+        
+        if insights.get('positive_trends'):
+            st.success("**🎉 Positive Trends:**\n" + "\n".join([f"- {t}" for t in insights['positive_trends']]))
+    else:
+        st.warning("AI insights unavailable. Using rule-based analysis.")
+    
+    st.divider()
+    
+    # =========================
+    # SECTION 4: Project Grid
+    # =========================
+    st.subheader("📂 Projects")
+    
+    # Status filter
+    status_filter = st.multiselect(
+        "Filter by Status",
+        ["CRITICAL", "AT_RISK", "GOOD", "EXCELLENT"],
+        default=["CRITICAL", "AT_RISK", "GOOD", "EXCELLENT"]
+    )
+    
+    projects = portfolio_data.get('projects', [])
+    filtered_projects = [p for p in projects if p.get('health_status') in status_filter]
+    
+    if not filtered_projects:
+        st.info("No projects match the selected filters")
+    else:
+        # Create project cards in grid
+        cols_per_row = 3
+        rows = [filtered_projects[i:i + cols_per_row] for i in range(0, len(filtered_projects), cols_per_row)]
+        
+        for row in rows:
+            cols = st.columns(cols_per_row)
+            
+            for col, project in zip(cols, row):
+                with col:
+                    # Project card
+                    status_emoji = project.get('status_emoji', '⚪')
+                    health_score = project.get('health_score', 0)
+                    
+                    # Card styling
+                    if health_score >= 70:
+                        border_color = "#22c55e"
+                    elif health_score >= 50:
+                        border_color = "#f59e0b"
+                    else:
+                        border_color = "#ef4444"
+                    
+                    st.markdown(f"""
+                    <div style="
+                        border-left: 4px solid {border_color};
+                        padding: 15px;
+                        background-color: #f9fafb;
+                        border-radius: 8px;
+                        margin-bottom: 10px;
+                    ">
+                        <h4 style =" color:black">{status_emoji} {project.get('project_name', 'Unnamed')}</h4>
+                        <p style="color: #666; font-size: 0.9em;">Client: {project.get('client', 'N/A')}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    st.metric("Health Score", f"{health_score}/100")
+                    st.progress(health_score / 100)
+                    
+                    col_a, col_b = st.columns(2)
+                    with col_a:
+                        st.caption(f"✅ {project.get('completion_rate', 0)}% done")
+                    with col_b:
+                        overdue = project.get('overdue_tasks', 0)
+                        st.caption(f"⚠️ {overdue} overdue")
+                    
+                    # Issues
+                    issues = project.get('critical_issues', [])
+                    if issues:
+                        with st.expander("⚠️ Issues"):
+                            for issue in issues:
+                                st.caption(f"• {issue}")
+                    
+                    # View details button
+                    if st.button("📊 View Details", key=f"view_{project.get('project_id')}", use_container_width=True):
+                        st.session_state.current_project = project.get('project_id')
+                        st.rerun()
+    
+    st.divider()
+    
+    # =========================
+    # SECTION 5: Charts
+    # =========================
+    st.subheader("📈 Analytics")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("**Health Score Distribution**")
+        
+        # Bar chart of health scores
+        df_health = pd.DataFrame([
+            {
+                'Project': p.get('project_name', 'Unnamed')[:20],
+                'Health Score': p.get('health_score', 0)
+            }
+            for p in projects[:10]  # Top 10
+        ])
+        
+        fig = px.bar(
+            df_health,
+            x='Project',
+            y='Health Score',
+            color='Health Score',
+            color_continuous_scale=['#ef4444', '#f59e0b', '#84cc16', '#22c55e']
+        )
+        fig.update_layout(height=300, showlegend=False)
+        st.plotly_chart(fig, use_container_width=True)
+    
+    with col2:
+        st.markdown("**Project Status Breakdown**")
+        
+        # Pie chart of status distribution
+        status_counts = {
+            'Critical': agg.get('critical_projects', 0),
+            'At Risk': agg.get('at_risk_projects', 0),
+            'Healthy': agg.get('healthy_projects', 0)
+        }
+        
+        fig = px.pie(
+            values=list(status_counts.values()),
+            names=list(status_counts.keys()),
+            color=list(status_counts.keys()),
+            color_discrete_map={
+                'Critical': '#ef4444',
+                'At Risk': '#f59e0b',
+                'Healthy': '#22c55e'
+            }
+        )
+        fig.update_layout(height=300)
+        st.plotly_chart(fig, use_container_width=True)
+    
+    # Resource heatmap
+    overloaded_members = portfolio_data.get('resource_insights', {}).get('overloaded_members', [])
+    
+    if overloaded_members:
+        st.markdown("**🔥 Resource Bottlenecks**")
+        st.warning(f"**{len(overloaded_members)} team member(s) working across multiple projects:**")
+        
+        for member in overloaded_members:
+            with st.expander(f"👤 {member['name']} - {member['project_count']} projects"):
+                st.write(f"**Total Tasks:** {member['total_tasks']}")
+                st.write(f"**Overdue:** {member['overdue_tasks']}")
+                st.write(f"**Projects:** {', '.join(member['projects'])}")
+                st.warning("💡 Consider redistributing tasks to balance workload")
+
+# ============================================================================
+# PAGE 1: AI CHATBOT 
+# ============================================================================
+elif page == "💬 AI Chatbot":
     st.title("💬 AI Project Assistant")
     st.markdown("Ask questions about your project and get instant answers!")
     
