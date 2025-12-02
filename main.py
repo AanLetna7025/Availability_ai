@@ -210,14 +210,36 @@ async def get_portfolio_insights():
     Get AI-generated insights about the entire portfolio.
     """
     try:
-        portfolio_data = await run_blocking_io(analyze_portfolio, timeout=60)
-        validate_result(portfolio_data)
+        print("[INFO] Portfolio insights endpoint called")
         
-        insights = await run_blocking_io(generate_portfolio_insights, portfolio_data, timeout=60)
-        return insights
+        portfolio_data = await run_blocking_io(analyze_portfolio, timeout=60)
+        
+        if "error" in portfolio_data:
+            print(f"[ERROR] Portfolio analysis failed: {portfolio_data['error']}")
+            raise HTTPException(status_code=500, detail=portfolio_data['error'])
+        
+        print("[INFO] Portfolio analyzed, generating AI insights...")
+        
+        insights = await run_blocking_io(
+            generate_portfolio_insights,
+            portfolio_data,
+            timeout=120
+        )
+        
+        # Ensure response has proper structure
+        if not isinstance(insights, dict):
+            raise HTTPException(status_code=500, detail="Invalid response from insights generator")
+        
+        print(f"[OK] Insights generated: success={insights.get('success', False)}")
+        
+        return insights  # Should have: success, insights, generated_at
+    
     except HTTPException:
         raise
     except Exception as e:
+        print(f"[ERROR] Exception in insights endpoint: {str(e)}")
+        import traceback
+        print(f"[TRACE] {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

@@ -260,7 +260,7 @@ def generate_portfolio_insights(portfolio_data: Dict[str, Any]) -> Dict[str, Any
     """
     try:
         llm = ChatGoogleGenerativeAI(
-            model=os.getenv("LLM_MODEL", "gemini-2.0-flash-exp"),
+            model=os.getenv("LLM_MODEL", "gemini-2.5-flash"),
             temperature=0.3,
             google_api_key=os.getenv("GOOGLE_API_KEY")
         )

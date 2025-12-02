@@ -202,7 +202,7 @@ def get_portfolio_overview():
 @st.cache_data(ttl=300)
 def get_portfolio_insights():
     try:
-        response = requests.get(f"{API_URL}/api/portfolio/insights", timeout=60)
+        response = requests.get(f"{API_URL}/api/portfolio/insights", timeout=120)
         if response.status_code == 200:
             return response.json()
         return {"error": response.json().get("detail", "Unknown error")}
@@ -398,32 +398,66 @@ if not project_id or page == " Portfolio Overview":
     # =========================
     # SECTION 3: AI Insights
     # =========================
+
     st.subheader("💡 AI-Generated Insights")
-    
-    if "error" not in insights_data and insights_data.get('success'):
-        insights = insights_data.get('insights', {})
+
+    print(f"[DEBUG] Insights response: {insights_data}")  # ← ADD DEBUG LOG
+
+    if "error" in insights_data:
+        # API returned an error
+        error_msg = insights_data['error']
+        st.error(f"❌ AI insights failed: {error_msg}")
+        st.info("Showing rule-based analysis instead...")
         
-        # Executive Summary
-        st.markdown(f"**Executive Summary:**")
-        st.info(insights.get('executive_summary', 'No summary available'))
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("**🔍 Key Insights:**")
-            for insight in insights.get('key_insights', []):
-                st.markdown(f"- {insight}")
-        
-        with col2:
-            st.markdown("**✅ Immediate Actions:**")
-            for action in insights.get('immediate_actions', []):
-                st.markdown(f"- {action}")
-        
-        if insights.get('positive_trends'):
-            st.success("**🎉 Positive Trends:**\n" + "\n".join([f"- {t}" for t in insights['positive_trends']]))
+    elif not insights_data.get('success', False):
+        # API didn't return success flag
+        st.warning("⚠️ AI insights unavailable (empty response)")
+        st.info("Showing rule-based analysis instead...")
+
     else:
-        st.warning("AI insights unavailable. Using rule-based analysis.")
-    
+        # Success! Display insights
+        try:
+            insights = insights_data.get('insights', {})
+            
+            if not insights:
+                st.warning("AI returned empty insights")
+            else:
+                # Executive Summary
+                exec_summary = insights.get('executive_summary', '')
+                if exec_summary:
+                    st.markdown("**📋 Executive Summary:**")
+                    st.info(exec_summary)
+                
+                # Key Insights & Actions
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.markdown("**🔍 Key Insights:**")
+                    key_insights = insights.get('key_insights', [])
+                    if key_insights:
+                        for insight in key_insights:
+                            st.markdown(f"✓ {insight}")
+                    else:
+                        st.markdown("_No specific insights_")
+                
+                with col2:
+                    st.markdown("**✅ Immediate Actions:**")
+                    actions = insights.get('immediate_actions', [])
+                    if actions:
+                        for action in actions:
+                            st.markdown(f"→ {action}")
+                    else:
+                        st.markdown("_No immediate actions needed_")
+                
+                # Positive Trends
+                trends = insights.get('positive_trends', [])
+                if trends:
+                    st.success("**🎉 Positive Trends:**")
+                    for trend in trends:
+                        st.markdown(f"📈 {trend}")
+        
+        except Exception as e:
+            st.error(f"Error displaying insights: {str(e)}")
     st.divider()
     
     # =========================
