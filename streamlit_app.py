@@ -127,7 +127,7 @@ with st.sidebar:
         st.session_state.current_project = project_id
         if project_id not in st.session_state.messages:
             st.session_state.messages[project_id] = []
-    
+        st.rerun()
     st.divider()
 
     # Page navigation
@@ -146,13 +146,13 @@ with st.sidebar:
         )
         
         # Clear project button
-        if st.button("← Back to Portfolio", use_container_width=True):
+        if st.button("← Back to Portfolio", width="stretch"):
             st.session_state.current_project = ""
             st.rerun()
         
         # Clear chat button (only on chatbot page)
         if page == "💬 AI Chatbot":
-            if st.button("🗑️ Clear Chat", use_container_width=True):
+            if st.button("🗑️ Clear Chat", width="stretch"):
                 if project_id in st.session_state.messages:
                     st.session_state.messages[project_id] = []
                     st.rerun()
@@ -287,7 +287,7 @@ if not project_id or page == " Portfolio Overview":
     # Refresh button
     col1, col2, col3 = st.columns([6, 1, 1])
     with col3:
-        if st.button("🔄 Refresh", use_container_width=True):
+        if st.button("🔄 Refresh", width="stretch"):
             st.cache_data.clear()
             st.rerun()
     
@@ -307,7 +307,6 @@ if not project_id or page == " Portfolio Overview":
     st.subheader("📊 Portfolio at a Glance")
     
     col1, col2, col3, col4, col5 = st.columns(5)
-    
     with col1:
         st.metric(
             "Total Projects",
@@ -458,8 +457,11 @@ if not project_id or page == " Portfolio Overview":
                         border-radius: 8px;
                         margin-bottom: 10px;
                     ">
-                        <h4 style =" color:black">{status_emoji} {project.get('project_name', 'Unnamed')}</h4>
+                        <h4 style="color:black">{status_emoji} {project.get('project_name', 'Unnamed')}</h4>
                         <p style="color: #666; font-size: 0.9em;">Client: {project.get('client', 'N/A')}</p>
+                        <p style="color: #999; font-size: 0.75em; margin-top: 8px; word-break: break-all;">
+                            <strong>ID:</strong> <code>{project.get('project_id', 'N/A')}</code>
+                        </p>
                     </div>
                     """, unsafe_allow_html=True)
                     
@@ -481,7 +483,7 @@ if not project_id or page == " Portfolio Overview":
                                 st.caption(f"• {issue}")
                     
                     # View details button
-                    if st.button("📊 View Details", key=f"view_{project.get('project_id')}", use_container_width=True):
+                    if st.button("📊 View Details", key=f"view_{project.get('project_id')}", width="stretch"):
                         st.session_state.current_project = project.get('project_id')
                         st.rerun()
     
@@ -566,7 +568,7 @@ if not project_id or page == " Portfolio Overview":
                 bargap=0.3
             )
             
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
         else:
             st.info("No project data available")
 
@@ -618,7 +620,7 @@ if not project_id or page == " Portfolio Overview":
                     marker=dict(line=dict(color='rgba(255,255,255,0.3)', width=2))
                 )
                 
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width="stretch")
             else:
                 st.info("No status data available")
         else:
@@ -721,7 +723,7 @@ elif page == "📊 Dashboard":
     # Refresh button
     col1, col2, col3 = st.columns([6, 1, 1])
     with col3:
-        if st.button("🔄 Refresh", use_container_width=True):
+        if st.button("🔄 Refresh", width="stretch"):
             st.cache_data.clear()
             st.rerun()
     
@@ -807,7 +809,7 @@ elif page == "📊 Dashboard":
             }
         ))
         fig.update_layout(height=300)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
     
     with col2:
         st.subheader("Score Components")
@@ -843,7 +845,7 @@ elif page == "📊 Dashboard":
                 'Overdue': '#ef4444'
             }
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
     
     with col2:
         st.subheader("🚀 Team Velocity")
@@ -922,7 +924,7 @@ elif page == "🔍 Analytics":
                     title="Workload per Team Member",
                     barmode='group'
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width="stretch")
                 
                 # Detailed breakdown
                 st.subheader("Team Member Details")
@@ -1114,7 +1116,7 @@ elif page == "📄 Reports":
         format_func=lambda x: f"📄 {x} Report"
     )
     
-    if st.button("📥 Generate Report", type="primary", use_container_width=True):
+    if st.button("📥 Generate Report", type="primary", width="stretch"):
         with st.spinner(f"Generating {report_type.lower()} report..."):
             report_data = get_report(project_id, report_type.lower())
             
@@ -1133,7 +1135,7 @@ elif page == "📄 Reports":
                     data=report_data.get('report', ''),
                     file_name=f"{report_type.lower()}_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
                     mime="text/plain",
-                    use_container_width=True
+                    width="stretch"
                 )
 
 # ============================================================================
@@ -1153,7 +1155,7 @@ elif page == "💡 Recommendations":
             horizontal=True
         )
     with col2:
-        if st.button("🔄 Refresh", use_container_width=True):
+        if st.button("🔄 Refresh", width="stretch"):
             st.cache_data.clear()
             st.rerun()
     

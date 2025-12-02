@@ -49,6 +49,7 @@ def get_all_projects() -> List[Dict[str, Any]]:
         # Convert ObjectIds to strings
         for project in projects:
             project['_id'] = str(project['_id'])
+            project['project_id'] = project['_id']
             if project.get('client'):
                 # Get client name
                 client = db.clients.find_one({"_id": project['client']})
