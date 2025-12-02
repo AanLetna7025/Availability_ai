@@ -8,6 +8,8 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
+import time
+
 
 
 
@@ -95,17 +97,31 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Check API connection
 @st.cache_data(ttl=60)
 def check_api_health():
-    try:
-        response = requests.get(f"{API_URL}/health", timeout=5)
-        return response.status_code == 200
-    except:
-        return False
+    max_retries = 5
+    retry_delay = 2
+    
+    for attempt in range(max_retries):
+        try:
+            response = requests.get(f"{API_URL}/health", timeout=10)
+            if response.status_code == 200:
+                return True
+        except requests.exceptions.Timeout:
+            if attempt < max_retries - 1:
+                print(f"[RETRY] API health check attempt {attempt + 1}/{max_retries}")
+                time.sleep(retry_delay)
+                continue
+        except Exception as e:
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay)
+                continue
+    
+    return False
 
 if not check_api_health():
-    st.error("❌ Cannot connect to backend API. Make sure FastAPI is running on port 8000.")
+    st.error("❌ Cannot connect to backend API. Waiting for FastAPI to start...")
+    st.info("If this persists, check that FastAPI is running on port 8000.")
     st.stop()
 
 # ============================================================================
@@ -176,7 +192,7 @@ with st.sidebar:
 @st.cache_data(ttl=300)  # Cache for 5 minutes
 def get_portfolio_overview():
     try:
-        response = requests.get(f"{API_URL}/api/portfolio/overview", timeout=30)
+        response = requests.get(f"{API_URL}/api/portfolio/overview", timeout=60)
         if response.status_code == 200:
             return response.json()
         return {"error": response.json().get("detail", "Unknown error")}
@@ -186,7 +202,7 @@ def get_portfolio_overview():
 @st.cache_data(ttl=300)
 def get_portfolio_insights():
     try:
-        response = requests.get(f"{API_URL}/api/portfolio/insights", timeout=30)
+        response = requests.get(f"{API_URL}/api/portfolio/insights", timeout=60)
         if response.status_code == 200:
             return response.json()
         return {"error": response.json().get("detail", "Unknown error")}
@@ -196,7 +212,7 @@ def get_portfolio_insights():
 @st.cache_data(ttl=300)
 def list_all_projects():
     try:
-        response = requests.get(f"{API_URL}/api/portfolio/projects", timeout=10)
+        response = requests.get(f"{API_URL}/api/portfolio/projects", timeout=20)
         if response.status_code == 200:
             return response.json()
         return {"error": response.json().get("detail", "Unknown error")}
@@ -210,7 +226,7 @@ def list_all_projects():
 @st.cache_data(ttl=300)  # Cache for 5 minutes
 def get_project_health(proj_id):
     try:
-        response = requests.get(f"{API_URL}/api/projects/{proj_id}/health", timeout=10)
+        response = requests.get(f"{API_URL}/api/projects/{proj_id}/health", timeout=20)
         if response.status_code == 200:
             return response.json()
         return {"error": response.json().get("detail", "Unknown error")}
@@ -529,7 +545,8 @@ if not project_id or page == " Portfolio Overview":
                     y=[row['Health Score']],
                     marker=dict(
                         color=color,
-                        line=dict(color='rgba(255,255,255,0.3)', width=2),
+                        line=dict(color='rgba(255,255,255,0.3)',
+                        width=2),
                         opacity=1.0
                     ),
                     text=[row['Health Score']],

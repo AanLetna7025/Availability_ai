@@ -215,7 +215,7 @@ def main():
         sys.exit(1)
     
     # Give FastAPI time to initialize (import modules, load dependencies)
-    initial_delay = 20 if IS_PRODUCTION else 15
+    initial_delay = 25 if IS_PRODUCTION else 15
     print(f"[WAIT] Giving FastAPI {initial_delay} seconds to initialize...", flush=True)
     time.sleep(initial_delay)
     
@@ -226,11 +226,14 @@ def main():
         sys.exit(1)
     
     # --- 2. Wait for FastAPI to be ready ---
-    # Give it 100 seconds total (50 attempts × 2 seconds)
-    if not check_fastapi_ready(max_attempts=50, delay=2):
+    if not check_fastapi_ready(max_attempts=100, delay=1):
         print("\n[ERROR] FastAPI failed to start. Exiting.", flush=True)
         cleanup_processes()
         sys.exit(1)
+        
+    print("[OK] FastAPI is ready!")
+    print("[WAIT] FastAPI stabilizing for 10 more seconds...")
+    time.sleep(10)
     
     # --- 3. Start Streamlit (Frontend) ---
     print(f"\n>> Starting Streamlit interface on port {STREAMLIT_PORT}...", flush=True)

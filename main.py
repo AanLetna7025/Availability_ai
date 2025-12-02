@@ -561,9 +561,8 @@ async def root():
 if __name__ == "__main__":
     import uvicorn
     
-    # Get PORT from environment (Render sets this), default to 8000 locally
-    port = int(os.getenv("PORT", "8000"))
-    host = "0.0.0.0"  # Listen on all interfaces for Render
+    host = "0.0.0.0"
+    port = 8000
     
     print(f"\n{'='*60}")
     print(f"🚀 Starting FastAPI on {host}:{port}")
