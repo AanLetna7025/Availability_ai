@@ -29,8 +29,7 @@ from chatbot_core.analysis_tool import (
     calculate_project_health
 )
 from chatbot_core.recommendation_engine import (
-    generate_ai_recommendations,
-    generate_rule_based_recommendations
+    generate_ai_recommendations
 )
 from chatbot_core.portfolio_analyzer import (
     analyze_portfolio,
@@ -191,55 +190,53 @@ async def health_check_full():
 # ============================================================================
 
 @app.get("/api/portfolio/overview")
-async def get_portfolio_overview():
+async def get_overview():
     """
     Get portfolio-wide analysis of all projects.
+    Perfect for the homepage dashboard - no project ID needed!
+    
+    Returns:
+    - Total projects count
+    - Portfolio health score
+    - Aggregated metrics
+    - Project summaries
+    - Critical alerts
+    - Resource insights
+    
+    Example:
+    GET /api/portfolio/overview
     """
     try:
-        portfolio_data = await run_blocking_io(analyze_portfolio, timeout=60)
-        return validate_result(portfolio_data)
-    except HTTPException:
-        raise
+        portfolio_data = analyze_portfolio()
+        if "error" in portfolio_data:
+            return portfolio_data
+        return portfolio_data
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/portfolio/insights")
-async def get_portfolio_insights():
+async def get_insights():
     """
     Get AI-generated insights about the entire portfolio.
+    
+    Returns:
+    - Executive summary
+    - Key insights
+    - Immediate actions needed
+    - Positive trends
+    
+    Example:
+    GET /api/portfolio/insights
     """
     try:
-        print("[INFO] Portfolio insights endpoint called")
-        
-        portfolio_data = await run_blocking_io(analyze_portfolio, timeout=60)
-        
+        portfolio_data = analyze_portfolio()
         if "error" in portfolio_data:
-            print(f"[ERROR] Portfolio analysis failed: {portfolio_data['error']}")
-            raise HTTPException(status_code=500, detail=portfolio_data['error'])
+            raise HTTPException(status_code=404, detail=portfolio_data["error"])
         
-        print("[INFO] Portfolio analyzed, generating AI insights...")
-        
-        insights = await run_blocking_io(
-            generate_portfolio_insights,
-            portfolio_data,
-            timeout=120
-        )
-        
-        # Ensure response has proper structure
-        if not isinstance(insights, dict):
-            raise HTTPException(status_code=500, detail="Invalid response from insights generator")
-        
-        print(f"[OK] Insights generated: success={insights.get('success', False)}")
-        
-        return insights  # Should have: success, insights, generated_at
-    
-    except HTTPException:
-        raise
+        insights = generate_portfolio_insights(portfolio_data)
+        return insights
     except Exception as e:
-        print(f"[ERROR] Exception in insights endpoint: {str(e)}")
-        import traceback
-        print(f"[TRACE] {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -247,9 +244,18 @@ async def get_portfolio_insights():
 async def list_all_projects():
     """
     Get a simple list of all active projects.
+    
+    Returns:
+    - Project IDs
+    - Project names
+    - Client names
+    - Basic info
+    
+    Example:
+    GET /api/portfolio/projects
     """
     try:
-        projects = await run_blocking_io(get_all_projects)
+        projects = get_all_projects()
         return {
             "total": len(projects),
             "projects": projects
@@ -357,7 +363,7 @@ async def get_project_dashboard(project_id: str):
         velocity_task = run_blocking_io(calculate_team_velocity, project_id, 7)
         bottlenecks_task = run_blocking_io(detect_bottlenecks, project_id)
         milestones_task = run_blocking_io(analyze_milestone_risks, project_id)
-        recs_task = run_blocking_io(generate_rule_based_recommendations, project_id)
+        recs_task = run_blocking_io(generate_ai_recommendations, project_id, 5)
         
         health, workload, velocity, bottlenecks, milestones, recs = await asyncio.gather(
             health_task,
@@ -374,9 +380,14 @@ async def get_project_dashboard(project_id: str):
             "velocity": velocity,
             "bottlenecks": bottlenecks,
             "milestone_risks": milestones,
-            "top_recommendations": recs.get("recommendations", [])[:3]
-        }
-        
+            }
+        if recs.get("success") and "error" not in recs:
+            dashboard["top_recommendations"]= recs.get("recommendations",[])
+        else:
+            dashboard["top_recommendations"]=[]
+            if "error" in recs:
+                dashboard["recommendation_error"]=recs.get("error")
+
         return dashboard
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -525,22 +536,23 @@ async def get_risk_report(project_id: str):
 @app.get("/api/projects/{project_id}/recommendations")
 async def get_recommendations(
     project_id: str, 
-    method: str = Query(default="ai", regex="^(ai|rules)$"),
     max_recommendations: int = Query(default=5, ge=1, le=20)
 ):
-    """Generate AI-powered recommendations to improve project health."""
-    try:
-        if method.lower() == "ai":
-            result = await run_blocking_io(
-                generate_ai_recommendations, 
+    """Generate AI-powered recommendations to improve project health.
+       
+       Query parameter:
+       -Max_recommendations:maximum number to return (default:5,max:20)
+       
+       Reteurns:
+       -List of actionable reccommendations with priority, category, action,etc.
+
+    """
+    try:    
+        result = await run_blocking_io(
+            generate_ai_recommendations, 
                 project_id, 
                 max_recommendations,
                 timeout=60
-            )
-        else:
-            result = await run_blocking_io(
-                generate_rule_based_recommendations, 
-                project_id
             )
         
         return validate_result(result)
@@ -549,17 +561,6 @@ async def get_recommendations(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
-@app.get("/api/projects/{project_id}/recommendations/rules")
-async def get_rule_based_recommendations(project_id: str):
-    """Generate rule-based recommendations (no AI)."""
-    try:
-        result = await run_blocking_io(generate_rule_based_recommendations, project_id)
-        return validate_result(result)
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 # ============================================================================
 # ROOT ENDPOINT

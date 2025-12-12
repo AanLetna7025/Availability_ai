@@ -110,7 +110,7 @@ pip install -r requirements.txt
 # Create .env file in the project root with:
 MONGO_URI=mongodb://username:password@host:port/database_name
 GOOGLE_API_KEY=your_google_api_key_here
-LLM_MODEL=gemini-2.0-flash-exp  # or latest Gemini model
+LLM_MODEL=gemini-2.5-flash  # or latest Gemini model
 ```
 
 ### Running the Application
@@ -244,7 +244,7 @@ availability_ai/
     ├── analysis_tool.py             # Analytics engine (6+ analysis functions)
     ├── portfolio_analyzer.py         # Portfolio-wide analysis
     ├── report_generator.py           # Report generation (5 report types)
-    ├── recommendation_engine.py      # AI and rule-based recommendations
+    ├── recommendation_engine.py      # AI recommendations
     └── __pycache__/                 # Python cache
 ```
 
@@ -405,11 +405,10 @@ Generate professional reports:
 - AI-powered actionable suggestions
 - Priority-based filtering (HIGH/MEDIUM/LOW)
 - Expected impact and effort estimates
-- Rule-based fallback for reliability
 
 ## API Endpoints
 
-### Portfolio (New!)
+### Portfolio
 - `GET /api/portfolio/overview` - All projects analysis
 - `GET /api/portfolio/insights` - AI-generated portfolio insights
 - `GET /api/portfolio/projects` - Simple project list

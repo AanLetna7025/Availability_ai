@@ -136,7 +136,7 @@ with st.sidebar:
         "Project ID",
         value=st.session_state.current_project,
         placeholder="Enter project ID here...",
-        help="Enter your MongoDB project ObjectId"
+        help="Enter your project Id"
     )
     
     if project_id != st.session_state.current_project:
@@ -190,7 +190,7 @@ with st.sidebar:
 # ============================================================================
 
 @st.cache_data(ttl=300)  # Cache for 5 minutes
-def get_portfolio_overview():
+def get_overview():
     try:
         response = requests.get(f"{API_URL}/api/portfolio/overview", timeout=60)
         if response.status_code == 200:
@@ -200,7 +200,7 @@ def get_portfolio_overview():
         return {"error": str(e)}
 
 @st.cache_data(ttl=300)
-def get_portfolio_insights():
+def get_insights():
     try:
         response = requests.get(f"{API_URL}/api/portfolio/insights", timeout=120)
         if response.status_code == 200:
@@ -309,8 +309,8 @@ if not project_id or page == " Portfolio Overview":
     
     # Load portfolio data
     with st.spinner("🔍 Analyzing ..."):
-        portfolio_data = get_portfolio_overview()
-        insights_data = get_portfolio_insights()
+        portfolio_data = get_overview()
+        insights_data = get_insights()
     
     if "error" in portfolio_data:
         st.error(f"❌ Error loading portfolio: {portfolio_data['error']}")
@@ -1199,12 +1199,9 @@ elif page == "💡 Recommendations":
     
     col1, col2 = st.columns([3, 1])
     with col1:
-        method = st.radio(
-            "Select Method",
-            ["ai", "rules"],
-            format_func=lambda x: "🤖 AI-Powered (Gemini)" if x == "ai" else "⚡ Rule-Based (Fast)",
-            horizontal=True
-        )
+        st.info("🤖 Using AI-Powered Recommendations (Gemini)")
+        method = "ai"
+
     with col2:
         if st.button("🔄 Refresh", width="stretch"):
             st.cache_data.clear()

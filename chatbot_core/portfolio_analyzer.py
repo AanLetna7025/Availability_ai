@@ -6,10 +6,10 @@ Aggregates insights and generates AI-powered recommendations
 """
 
 import os
+import re
+import json
 from typing import Dict, List, Any
 from datetime import datetime
-from pymongo import MongoClient
-from bson import ObjectId
 from langchain_google_genai import ChatGoogleGenerativeAI
 from dotenv import load_dotenv
 
@@ -260,161 +260,231 @@ def generate_portfolio_insights(portfolio_data: Dict[str, Any]) -> Dict[str, Any
     """
     try:
         llm = ChatGoogleGenerativeAI(
-            model=os.getenv("LLM_MODEL", "gemini-2.5-flash"),
-            temperature=0.3,
-            google_api_key=os.getenv("GOOGLE_API_KEY")
+            model=os.getenv("LLM_MODEL", "gemini-2.0-flash-exp"),
+            temperature=0.2,  # slightly lower for more consistent JSON
+            google_api_key=os.getenv("GOOGLE_API_KEY"),
         )
-        
-        # Build context for AI
-        context = f"""You are a senior portfolio manager analyzing {portfolio_data['total_projects']} software projects.
+
+        agg = portfolio_data.get("aggregated_metrics", {}) or {}
+        res = portfolio_data.get("resource_insights", {}) or {}
+        projects = portfolio_data.get("projects", []) or []
+
+        total_projects = portfolio_data.get("total_projects", 0)
+        portfolio_health = portfolio_data.get("portfolio_health", 0)
+
+        # ---------------- Context building ----------------
+        context = f"""You are a senior portfolio manager analyzing {total_projects} software projects.
 
 PORTFOLIO OVERVIEW:
-- Total Projects: {portfolio_data['total_projects']}
-- Portfolio Health: {portfolio_data['portfolio_health']}/100
-- Total Tasks: {portfolio_data['aggregated_metrics']['total_tasks']}
-- Completion Rate: {portfolio_data['aggregated_metrics']['avg_completion_rate']}%
-- Overdue Tasks: {portfolio_data['aggregated_metrics']['total_overdue']}
-- Total Team Members: {portfolio_data['aggregated_metrics']['total_team_members']}
+- Total Projects: {total_projects}
+- Portfolio Health: {portfolio_health}/100
+- Total Tasks: {agg.get('total_tasks', 0)}
+- Completion Rate: {agg.get('avg_completion_rate', 0)}%
+- Overdue Tasks: {agg.get('total_overdue', 0)}
+- Total Team Members: {agg.get('total_team_members', 0)}
 
 PROJECT STATUS DISTRIBUTION:
-- Critical: {portfolio_data['aggregated_metrics']['critical_projects']}
-- At Risk: {portfolio_data['aggregated_metrics']['at_risk_projects']}
-- Healthy: {portfolio_data['aggregated_metrics']['healthy_projects']}
+- Critical: {agg.get('critical_projects', 0)}
+- At Risk: {agg.get('at_risk_projects', 0)}
+- Healthy: {agg.get('healthy_projects', 0)}
 
 TOP 5 PROJECTS NEEDING ATTENTION:
 """
-        
-        # Add details of worst-performing projects
-        for i, project in enumerate(portfolio_data['projects'][:5], 1):
-            context += f"\n{i}. {project['project_name']} (Health: {project['health_score']}/100)\n"
-            context += f"   - Status: {project['health_status']}\n"
-            context += f"   - Completion: {project['completion_rate']}%\n"
-            context += f"   - Overdue: {project['overdue_tasks']} tasks\n"
-            if project['critical_issues']:
-                context += f"   - Issues: {', '.join(project['critical_issues'][:2])}\n"
-        
-        # Add resource insights
-        if portfolio_data['resource_insights']['overloaded_members']:
-            context += "\nCROSS-PROJECT RESOURCE ISSUES:\n"
-            for member in portfolio_data['resource_insights']['overloaded_members'][:3]:
-                context += f"- {member['name']}: Working on {member['project_count']} projects ({member['total_tasks']} tasks)\n"
-        
-        context += """
 
-Generate an executive summary in JSON format:
+        for i, project in enumerate(projects[:5], 1):
+            name = project.get("project_name", "Unnamed Project")
+            health_score = project.get("health_score", 0)
+            health_status = project.get("health_status", "UNKNOWN")
+            completion_rate = project.get("completion_rate", 0)
+            overdue_tasks = project.get("overdue_tasks", 0)
+            critical_issues = project.get("critical_issues", []) or []
+
+            context += f"\n{i}. {name} (Health: {health_score}/100)\n"
+            context += f"   - Status: {health_status}\n"
+            context += f"   - Completion: {completion_rate}%\n"
+            context += f"   - Overdue: {overdue_tasks} tasks\n"
+            if critical_issues:
+                context += f"   - Issues: {', '.join(critical_issues[:2])}\n"
+
+        overloaded_members = res.get("overloaded_members", []) or []
+        if overloaded_members:
+            context += "\nCROSS-PROJECT RESOURCE ISSUES:\n"
+            for member in overloaded_members[:3]:
+                name = member.get("name", "Unknown")
+                project_count = member.get("project_count", 0)
+                total_tasks = member.get("total_tasks", 0)
+                context += f"- {name}: Working on {project_count} projects ({total_tasks} tasks)\n"
+
+        # ---------------- Prompt instructions ----------------
+        context += """
+Generate an executive summary in JSON format ONLY.
+
+REQUIREMENTS:
+- Output MUST be a single valid JSON object.
+- Do NOT include markdown, code fences, comments, or any surrounding text.
+- Use a concise, professional, executive tone.
+- Use specific numbers and project names from the data above.
+- Focus on:
+  1. Specific numbers and project names
+  2. Actionable insights (not vague advice)
+  3. Resource allocation opportunities
+  4. Risk mitigation priorities
+
+The JSON object MUST follow this structure (these are examples, not literal text):
+
 {
-    "executive_summary": "2-3 sentence overview of portfolio health",
-    "key_insights": [
-        "Insight 1: Specific observation with data",
-        "Insight 2: Pattern or trend identified",
-        "Insight 3: Resource or bottleneck issue"
-    ],
-    "immediate_actions": [
-        "Action 1: Specific, actionable recommendation",
-        "Action 2: Resource reallocation suggestion",
-        "Action 3: Risk mitigation step"
-    ],
-    "positive_trends": [
-        "Positive trend 1",
-        "Positive trend 2"
-    ]
+  "executive_summary": "2-3 sentence overview of portfolio health, key risks and opportunities.",
+  "key_insights": [
+    "Insight 1: Specific observation with data.",
+    "Insight 2: Pattern or trend identified with metrics.",
+    "Insight 3: Resource or bottleneck issue referencing overloaded members or critical projects."
+  ],
+  "immediate_actions": [
+    "Action 1: Specific, actionable recommendation with clear next step.",
+    "Action 2: Resource reallocation suggestion referencing projects/teams.",
+    "Action 3: Risk mitigation step with concrete focus."
+  ],
+  "positive_trends": [
+    "Positive trend 1 with numbers.",
+    "Positive trend 2 highlighting strong performance."
+  ]
 }
 
-Focus on:
-1. Specific numbers and project names
-2. Actionable insights (not vague advice)
-3. Resource allocation opportunities
-4. Risk mitigation priorities
+Now respond with ONLY the JSON object, and nothing else.
 """
-        
+
+        # ---------------- LLM call ----------------
         response = llm.invoke(context)
-        
-        # Parse JSON response
-        import json
-        import re
-        
-        response_text = response.content
-        json_match = re.search(r'```json\s*(\{.*?\})\s*```', response_text, re.DOTALL)
-        if json_match:
-            response_text = json_match.group(1)
-        
+        response_text = getattr(response, "content", response)
+        if not isinstance(response_text, str):
+            response_text = str(response_text)
+
+        # ---------------- JSON parsing strategy ----------------
+        insights = None
+
+        # 1) Try raw JSON
         try:
             insights = json.loads(response_text)
+        except json.JSONDecodeError:
+            # 2) Try to extract first {...} block
+            match = re.search(r"\{.*\}", response_text, re.DOTALL)
+            if match:
+                try:
+                    insights = json.loads(match.group(0))
+                except json.JSONDecodeError:
+                    insights = None
+
+        if isinstance(insights, dict):
             return {
                 "success": True,
                 "insights": insights,
-                "generated_at": datetime.now().isoformat()
+                "generated_at": datetime.now().isoformat(),
+                "method": "ai",
             }
-        except json.JSONDecodeError:
-            # Fallback to rule-based insights
-            return generate_rule_based_portfolio_insights(portfolio_data)
-        
+
+    
     except Exception as e:
         print(f"Error generating AI insights: {e}")
-        return generate_rule_based_portfolio_insights(portfolio_data)
+        
+
+#         # If parsing fails, use rules
+#         return generate_rule_based_portfolio_insights(portfolio_data)
+
+#     except Exception as e:
+#         print(f"Error generating AI insights: {e}")
+#         return generate_rule_based_portfolio_insights(portfolio_data)
 
 
-def generate_rule_based_portfolio_insights(portfolio_data: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Fallback: Generate portfolio insights using rules (no AI).
-    """
-    insights = {
-        "executive_summary": "",
-        "key_insights": [],
-        "immediate_actions": [],
-        "positive_trends": []
-    }
-    
-    # Executive summary
-    health = portfolio_data['portfolio_health']
-    critical = portfolio_data['aggregated_metrics']['critical_projects']
-    
-    if health >= 70:
-        insights['executive_summary'] = f"Portfolio is performing well with an average health score of {health}/100. "
-    elif health >= 50:
-        insights['executive_summary'] = f"Portfolio shows moderate health ({health}/100) with some areas requiring attention. "
-    else:
-        insights['executive_summary'] = f"Portfolio requires immediate attention with health score of {health}/100. "
-    
-    if critical > 0:
-        insights['executive_summary'] += f"{critical} project(s) are in critical state."
-    
-    # Key insights
-    overdue = portfolio_data['aggregated_metrics']['total_overdue']
-    if overdue > 20:
-        insights['key_insights'].append(f"High volume of overdue tasks: {overdue} tasks across portfolio")
-    
-    if critical > 0:
-        worst_projects = portfolio_data['projects'][:3]
-        project_names = ', '.join([p['project_name'] for p in worst_projects])
-        insights['key_insights'].append(f"Critical projects requiring attention: {project_names}")
-    
-    overloaded = len(portfolio_data['resource_insights']['overloaded_members'])
-    if overloaded > 0:
-        insights['key_insights'].append(f"{overloaded} team member(s) working across 3+ projects simultaneously")
-    
-    # Immediate actions
-    if critical > 0:
-        insights['immediate_actions'].append(f"Conduct emergency review of {critical} critical project(s)")
-    
-    if overdue > 10:
-        insights['immediate_actions'].append("Organize sprint to clear overdue task backlog")
-    
-    if overloaded > 0:
-        insights['immediate_actions'].append("Reassess resource allocation across projects")
-    
-    # Positive trends
-    healthy = portfolio_data['aggregated_metrics']['healthy_projects']
-    if healthy > 0:
-        insights['positive_trends'].append(f"{healthy} project(s) maintaining excellent health")
-    
-    completion_rate = portfolio_data['aggregated_metrics']['avg_completion_rate']
-    if completion_rate > 60:
-        insights['positive_trends'].append(f"Strong completion rate: {completion_rate}%")
-    
-    return {
-        "success": True,
-        "insights": insights,
-        "generated_at": datetime.now().isoformat(),
-        "method": "rules"
-    }
+# def generate_rule_based_portfolio_insights(portfolio_data: Dict[str, Any]) -> Dict[str, Any]:
+#     """
+#     Fallback: Generate portfolio insights using rules (no AI).
+#     Keeps your original logic but adds safe access and slightly more
+#     polished wording.
+#     """
+#     agg = portfolio_data.get("aggregated_metrics", {}) or {}
+#     res = portfolio_data.get("resource_insights", {}) or {}
+#     projects = portfolio_data.get("projects", []) or []
+
+#     health = portfolio_data.get("portfolio_health", 0)
+#     critical = agg.get("critical_projects", 0)
+#     overdue = agg.get("total_overdue", 0)
+#     healthy = agg.get("healthy_projects", 0)
+#     completion_rate = agg.get("avg_completion_rate", 0)
+#     overloaded_members = res.get("overloaded_members", []) or []
+#     overloaded_count = len(overloaded_members)
+
+#     insights = {
+#         "executive_summary": "",
+#         "key_insights": [],
+#         "immediate_actions": [],
+#         "positive_trends": [],
+#     }
+
+#     # Executive summary
+#     if health >= 70:
+#         insights["executive_summary"] = (
+#             f"Portfolio is performing well with an average health score of {health}/100. "
+#         )
+#     elif health >= 50:
+#         insights["executive_summary"] = (
+#             f"Portfolio shows moderate health ({health}/100) with some areas requiring attention. "
+#         )
+#     else:
+#         insights["executive_summary"] = (
+#             f"Portfolio requires immediate attention with a health score of {health}/100. "
+#         )
+
+#     if critical > 0:
+#         insights["executive_summary"] += f"{critical} project(s) are in a critical state."
+
+#     # Key insights
+#     if overdue > 20:
+#         insights["key_insights"].append(
+#             f"High volume of overdue work: {overdue} task(s) remain open across the portfolio."
+#         )
+
+#     if critical > 0 and projects:
+#         worst_projects = projects[:3]
+#         names = ", ".join([p.get("project_name", "Unnamed Project") for p in worst_projects])
+#         insights["key_insights"].append(
+#             f"Critical projects requiring immediate attention: {names}."
+#         )
+
+#     if overloaded_count > 0:
+#         insights["key_insights"].append(
+#             f"{overloaded_count} team member(s) are working across 3 or more projects, indicating potential overload."
+#         )
+
+#     # Immediate actions
+#     if critical > 0:
+#         insights["immediate_actions"].append(
+#             f"Conduct an urgent review of the {critical} critical project(s) and define clear recovery plans."
+#         )
+
+#     if overdue > 10:
+#         insights["immediate_actions"].append(
+#             "Plan a focused sprint to reduce the overdue task backlog in the most impacted projects."
+#         )
+
+#     if overloaded_count > 0:
+#         insights["immediate_actions"].append(
+#             "Rebalance workload for overloaded team members by shifting tasks to available capacity."
+#         )
+
+#     # Positive trends
+#     if healthy > 0:
+#         insights["positive_trends"].append(
+#             f"{healthy} project(s) are maintaining strong health, providing stability to the portfolio."
+#         )
+
+#     if completion_rate > 60:
+#         insights["positive_trends"].append(
+#             f"Overall completion rate is solid at {completion_rate}%, indicating steady delivery."
+#         )
+
+#     return {
+#         "success": True,
+#         "insights": insights,
+#         "generated_at": datetime.now().isoformat(),
+#         "method": "rules",
+#     }
