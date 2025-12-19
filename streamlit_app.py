@@ -401,7 +401,7 @@ if not project_id or page == " Portfolio Overview":
 
     st.subheader("💡 AI-Generated Insights")
 
-    print(f"[DEBUG] Insights response: {insights_data}")  # ← ADD DEBUG LOG
+    print(f"[DEBUG] Insights response: {insights_data}")
 
     if "error" in insights_data:
         # API returned an error
@@ -697,6 +697,10 @@ if not project_id or page == " Portfolio Overview":
 # PAGE 1: AI CHATBOT 
 # ============================================================================
 elif page == "💬 AI Chatbot":
+    health_data = get_project_health(project_id)
+    project_name = health_data.get('project_name', 'Unknown Project')
+    st.markdown(f"<h2>📁 Project: {project_name}</h2>", unsafe_allow_html=True)
+
     st.title("💬 AI Project Assistant")
     st.markdown("Ask questions about your project and get instant answers!")
     
@@ -787,6 +791,9 @@ elif page == "📊 Dashboard":
         st.error(f"❌ Error loading health data: {health_data['error']}")
         st.stop()
     
+    project_name = health_data.get('project_name', 'Unknown Project')
+    st.markdown(f"<h2>📁 Project: {project_name}</h2>", unsafe_allow_html=True)
+
     # Header metrics
     st.subheader("Project Health Overview")
     col1, col2, col3, col4 = st.columns(4)
@@ -922,6 +929,11 @@ elif page == "📊 Dashboard":
 # ============================================================================
 
 elif page == "🔍 Analytics":
+
+    health_data = get_project_health(project_id)
+    project_name = health_data.get('project_name', 'Unknown Project')
+    st.markdown(f"<h2>📁 Project: {project_name}</h2>", unsafe_allow_html=True)
+
     st.title("🔍 Deep Analytics")
     
     # Tabs for different analyses
@@ -1159,6 +1171,11 @@ elif page == "🔍 Analytics":
 # ============================================================================
 
 elif page == "📄 Reports":
+
+    health_data = get_project_health(project_id)
+    project_name = health_data.get('project_name', 'Unknown Project')
+    st.markdown(f"<h2>📁 Project: {project_name}</h2>", unsafe_allow_html=True)
+
     st.title("📄 Generated Reports")
     
     report_type = st.selectbox(
@@ -1194,6 +1211,11 @@ elif page == "📄 Reports":
 # ============================================================================
 
 elif page == "💡 Recommendations":
+
+    health_data = get_project_health(project_id)
+    project_name = health_data.get('project_name', 'Unknown Project')
+    st.markdown(f"<h2>📁 Project: {project_name}</h2>", unsafe_allow_html=True)
+
     st.title("💡 AI-Powered Recommendations")
     st.markdown("Get intelligent, actionable recommendations to improve your project health.")
     
